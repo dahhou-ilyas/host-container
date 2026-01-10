@@ -1,10 +1,9 @@
 package service
 
 import (
-	"errors"
-	"sync"
+	"context"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type User struct {
@@ -15,98 +14,63 @@ type User struct {
 	Containers *[]ContainerInfo `json:"project,omitempty"`
 }
 
-type UserStore struct {
-	mu    sync.RWMutex
-	users map[string]*User
+type UserService struct {
+	repo *UserRepo
 }
 
-func NewUserStore() *UserStore {
-	return &UserStore{users: make(map[string]*User)}
-}
-
-func ensureProjects(u *User) {
-	if u.Containers == nil {
-		u.Containers = &[]ContainerInfo{}
+func NewUserService(pool *pgxpool.Pool) *UserService {
+	return &UserService{
+		repo: NewUserRepo(pool),
 	}
 }
 
-func (s *UserStore) CreateUser(name, email, password string) string {
-	newId := uuid.New().String()
+func (s *UserService) CreateUser(ctx context.Context, name, email, password string) (string, error) {
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
 
-	u := &User{
-		Id:         newId,
-		Name:       name,
-		Email:      email,
-		Password:   password,
-		Containers: &[]ContainerInfo{},
+	user := User{
+		Name:     name,
+		Email:    email,
+		Password: password,
 	}
 
-	s.mu.Lock()
-	s.users[newId] = u
-	s.mu.Unlock()
+	id, err := s.repo.CreateUser(ctx, tx, user)
+	if err != nil {
+		return "", err
+	}
 
-	return newId
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+
+	return id, nil
 }
 
-func (s *UserStore) GetUser(id string) (*User, bool) {
-	s.mu.RLock()
-	u, ok := s.users[id]
-	s.mu.RUnlock()
-
-	if ok {
-		ensureProjects(u)
-	}
-	return u, ok
+func (s *UserService) GetUser(ctx context.Context, id string) (User, error) {
+	return s.repo.GetUserByID(ctx, s.repo.GetDB(), id)
 }
 
-func (s *UserStore) ListUsers() []*User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	out := make([]*User, 0, len(s.users))
-	for _, u := range s.users {
-		ensureProjects(u)
-		out = append(out, u)
-	}
-	return out
+func (s *UserService) GetUserWithContainers(ctx context.Context, id string) (User, []ContainerInfo, error) {
+	return s.repo.GetContainersForUserByID(ctx, s.repo.GetDB(), id)
 }
 
-type UserUpdate struct {
-	Name     *string
-	Email    *string
-	Password *string
-}
-
-func (s *UserStore) UpdateUser(id string, upd UserUpdate) (*User, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	u, ok := s.users[id]
-	if !ok {
-		return nil, errors.New("user not found")
+func (s *UserService) DeleteUser(ctx context.Context, id string) error {
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
 	}
-	ensureProjects(u)
+	defer tx.Rollback(ctx)
 
-	if upd.Name != nil {
-		u.Name = *upd.Name
-	}
-	if upd.Email != nil {
-		u.Email = *upd.Email
-	}
-	if upd.Password != nil {
-		u.Password = *upd.Password
+	if err := s.repo.DeleteUserByID(ctx, tx, id); err != nil {
+		return err
 	}
 
-	return u, nil
-}
-
-func (s *UserStore) DeleteUser(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.users[id]; !ok {
-		return false
+	if err := tx.Commit(ctx); err != nil {
+		return err
 	}
-	delete(s.users, id)
-	return true
+
+	return nil
 }

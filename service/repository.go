@@ -96,6 +96,14 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 	return &UserRepo{pool: pool}
 }
 
+func (u *UserRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return u.pool.Begin(ctx)
+}
+
+func (u *UserRepo) GetDB() DB {
+	return u.pool
+}
+
 
 
 func (u *UserRepo) CreateUser(ctx context.Context, db DB, user User) (string, error) {
@@ -110,7 +118,7 @@ func (u *UserRepo) CreateUser(ctx context.Context, db DB, user User) (string, er
 
 
 
-func (u *User) GetUserByID(ctx context.Context, db DB, id string) (User, error) {
+func (u *UserRepo) GetUserByID(ctx context.Context, db DB, id string) (User, error) {
 	var user User
 	err := db.QueryRow(ctx, `
 		SELECT id::text, name, email
@@ -125,7 +133,7 @@ func (u *User) GetUserByID(ctx context.Context, db DB, id string) (User, error) 
 }
 
 
-func (u *User) GetContainersForUserByID(ctx context.Context, db DB, userId string) (User, []ContainerInfo, error) {
+func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId string) (User, []ContainerInfo, error) {
 	var user User
 	containers := make([]ContainerInfo, 0)
 
@@ -204,4 +212,21 @@ func (u *User) GetContainersForUserByID(ctx context.Context, db DB, userId strin
 	user.Containers = &containers
 
 	return user, containers, nil
+}
+
+
+func (u *UserRepo) DeleteUserByID(ctx context.Context, db DB, userId string) error {
+	if _, err := db.Exec(ctx, `DELETE FROM containers WHERE user_id = $1::bigint`, userId); err != nil {
+		return err
+	}
+
+	tag, err := db.Exec(ctx, `DELETE FROM users WHERE id = $1::bigint`, userId)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() == 0 {
+		return UserNotFound
+	}
+	return nil
 }
