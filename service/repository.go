@@ -140,6 +140,21 @@ func (u *UserRepo) GetUserByID(ctx context.Context, db DB, id string) (User, err
 	return user, err
 }
 
+func (u *UserRepo) GetUserByEmail(ctx context.Context, db DB, email string) (User, error) {
+	var user User
+
+	err := db.QueryRow(ctx, `
+		SELECT id::text, name, email
+		FROM Users
+		WHERE email = $1
+	`, email).Scan(&user.Id, &user.Name, &user.Email)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, UserNotFound
+	}
+	return user, err 
+}
+
 
 func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId string) (User, []ContainerInfo, error) {
 	var user User
