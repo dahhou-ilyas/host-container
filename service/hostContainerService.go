@@ -23,7 +23,7 @@ type ContainerInfo struct {
 	FolderPath  string `json:"folder_path"`
 	Port        string `json:"port,omitempty"`
 	Status      string `json:"status"`
-	userId      string `json:"userId"`
+	UserId      string `json:"userId"`
 }
 
 type ContainerManager struct {
