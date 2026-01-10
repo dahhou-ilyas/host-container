@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Project struct {
@@ -36,8 +37,8 @@ type Handler struct {
 	manager *ContainerManager
 }
 
-func NewHandler(basePath string) (*Handler, error) {
-	manager, err := NewContainerManager(basePath)
+func NewHandler(basePath string, pool *pgxpool.Pool) (*Handler, error) {
+	manager, err := NewContainerManager(basePath,pool)
 	if err != nil {
 		return nil, err
 	}
@@ -61,10 +62,10 @@ func (h *Handler) CreateContainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//if req.Project.UserId == "" {
-	//	h.respondError(w, "user Id is required", http.StatusBadRequest)
-	//	return
-	//}
+	if req.Project.UserId == "" {
+		h.respondError(w, "user Id is required", http.StatusBadRequest)
+		return
+	}
 
 	if req.Project.ID == "" {
 		req.Project.ID = uuid.New().String()

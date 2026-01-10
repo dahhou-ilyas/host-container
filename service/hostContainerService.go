@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
