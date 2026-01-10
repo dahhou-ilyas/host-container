@@ -30,7 +30,7 @@ type ContainerInfo struct {
 type ContainerManager struct {
 	client              *client.Client
 	basePath            string
-	contianerRepository *ContainerRepo
+	repo *ContainerRepo
 }
 
 func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager, error) {
@@ -47,17 +47,16 @@ func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager,
 	return &ContainerManager{
 		client:     cli,
 		basePath:   basePath,
-		contianerRepository: NewContainerRepo(pool),
+		repo: NewContainerRepo(pool),
 	}, nil
 }
 
 func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project, imageName string) (*ContainerInfo, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	if _, exists := cm.containers[project.ID]; exists {
-		return nil, fmt.Errorf("container already exists for project %s", project.ID)
+	tx, err := cm.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback(ctx)
 
 	folderPath := filepath.Join(cm.basePath, project.Name+"#"+project.ID)
 	log.Printf(folderPath)
@@ -109,17 +108,26 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		Status:      "running",
 	}
 
-	cm.containers[project.ID] = info
+	id , err := cm.repo.CreateContainer(ctx,tx,*info)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	info.ProjectID = id
+
 	return info, nil
 }
 
 func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project Project, imageName string, containerPort string) (*ContainerInfo, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	if _, exists := cm.containers[project.ID]; exists {
-		return nil, fmt.Errorf("container already exists for project %s", project.ID)
+	tx, err := cm.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback(ctx)
 
 	folderPath := filepath.Join(cm.basePath, project.Name, project.ID)
 	log.Printf(folderPath)
@@ -188,16 +196,26 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		Status:      "running",
 	}
 
-	cm.containers[project.ID] = info
+	id , err := cm.repo.CreateContainer(ctx,tx,*info)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	info.ProjectID = id
+
 	return info, nil
 }
 
 func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, cmd []string) (string, error) {
-	cm.mu.RLock()
-	info, exists := cm.containers[projectID]
-	cm.mu.RUnlock()
+	info, err := cm.repo.GetContainerByID(ctx,cm.repo.GetDB(),projectID)
 
-	if !exists {
+
+
+	if err != nil {
 		return "", fmt.Errorf("container not found for project %s", projectID)
 	}
 
@@ -227,11 +245,14 @@ func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, c
 }
 
 func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	tx, err := cm.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
-	info, exists := cm.containers[projectID]
-	if !exists {
+	info, err := cm.repo.GetContainerByID(ctx,cm.repo.GetDB(),projectID)
+	if err  != nil{
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
@@ -241,15 +262,29 @@ func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string)
 	}
 
 	info.Status = "stopped"
+
+	
+	_ , err = cm.repo.UpdateContainer(ctx,tx,info.ProjectID,info)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string) error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	tx, err := cm.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
-	info, exists := cm.containers[projectID]
-	if !exists {
+	info, err := cm.repo.GetContainerByID(ctx,cm.repo.GetDB(),projectID)
+	if err != nil {
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
@@ -258,15 +293,28 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string
 	}
 
 	info.Status = "running"
+
+	_ , err = cm.repo.UpdateContainer(ctx,tx,info.ProjectID,info)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	
 	return nil
 }
 
 func (cm *ContainerManager) RemoveContainer(ctx context.Context, projectID string, removeFolder bool) error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	tx, err := cm.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
-	info, exists := cm.containers[projectID]
-	if !exists {
+	info, err := cm.repo.GetContainerByID(ctx,tx,projectID)
+	if err != nil{
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
@@ -282,33 +330,29 @@ func (cm *ContainerManager) RemoveContainer(ctx context.Context, projectID strin
 			return fmt.Errorf("failed to remove folder: %w", err)
 		}
 	}
+	err = cm.repo.DeleteContainer(ctx,tx,projectID)
 
-	delete(cm.containers, projectID)
+	if err!=nil {
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (cm *ContainerManager) GetContainerInfo(projectID string) (*ContainerInfo, error) {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+func (cm *ContainerManager) GetContainerInfo(ctx context.Context ,projectID string) (*ContainerInfo, error) {
 
-	info, exists := cm.containers[projectID]
-	if !exists {
+	info, err := cm.repo.GetContainerByID(ctx , cm.repo.GetDB() , projectID)
+	if err != nil {
 		return nil, fmt.Errorf("container not found for project %s", projectID)
 	}
 
-	return info, nil
+	return &info, nil
 }
 
-func (cm *ContainerManager) ListContainers() []*ContainerInfo {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-
-	list := make([]*ContainerInfo, 0, len(cm.containers))
-	for _, info := range cm.containers {
-		list = append(list, info)
-	}
-	return list
-}
 
 func (cm *ContainerManager) pullImageIfNeeded(ctx context.Context, imageName string) error {
 	_, _, err := cm.client.ImageInspectWithRaw(ctx, imageName)

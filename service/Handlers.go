@@ -115,7 +115,7 @@ func (h *Handler) GetContainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := h.manager.GetContainerInfo(projectID)
+	info, err := h.manager.GetContainerInfo(r.Context(),projectID)
 	if err != nil {
 		h.respondError(w, err.Error(), http.StatusNotFound)
 		return
@@ -124,15 +124,7 @@ func (h *Handler) GetContainer(w http.ResponseWriter, r *http.Request) {
 	h.respondJSON(w, APIResponse{Success: true, Data: info}, http.StatusOK)
 }
 
-func (h *Handler) ListContainers(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.respondError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
-	containers := h.manager.ListContainers()
-	h.respondJSON(w, APIResponse{Success: true, Data: containers}, http.StatusOK)
-}
 
 func (h *Handler) StartContainer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

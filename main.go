@@ -206,7 +206,7 @@ func main() {
 	router.HandleFunc("/containers", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handler.ListContainers(w, r)
+			//handler.ListContainers(w, r)
 		case http.MethodPost:
 			handler.CreateContainer(w, r)
 		default:
