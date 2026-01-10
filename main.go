@@ -1,6 +1,7 @@
 package main
 
 import (
+	"docker-wrapper/db_config"
 	"docker-wrapper/service"
 	"log"
 	"net/http"
@@ -193,13 +194,18 @@ func main() {
 		basePath = "/tmp/projects"
 	}
 
-	handler, err := service.NewHandler(basePath)
+	db_config.Init("localhos postgres")
+	
+	handler, err := service.NewHandler(basePath,db_config.Pool())
 
 	if err != nil {
 		log.Fatalf("Failed to create handler: %v", err)
 	}
 
-	defer handler.Close()
+	defer func ()  {
+		handler.Close()
+		db_config.Close()
+	}()
 
 	router := mux.NewRouter()
 
