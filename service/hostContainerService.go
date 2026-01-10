@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/go-connections/nat"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/moby/moby/client"
 )
 
@@ -29,12 +30,10 @@ type ContainerInfo struct {
 type ContainerManager struct {
 	client              *client.Client
 	basePath            string
-	containers          map[string]*ContainerInfo // projectID -> ContainerInfo // pour le database je doit mofier en remplacent par le répo C
-	mu                  sync.RWMutex
 	contianerRepository *ContainerRepo
 }
 
-func NewContainerManager(basePath string) (*ContainerManager, error) {
+func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
@@ -48,7 +47,7 @@ func NewContainerManager(basePath string) (*ContainerManager, error) {
 	return &ContainerManager{
 		client:     cli,
 		basePath:   basePath,
-		containers: make(map[string]*ContainerInfo),
+		contianerRepository: NewContainerRepo(pool),
 	}, nil
 }
 

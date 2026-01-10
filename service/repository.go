@@ -31,6 +31,14 @@ func NewContainerRepo(pool *pgxpool.Pool) *ContainerRepo {
 	return &ContainerRepo{pool: pool}
 }
 
+func (c *ContainerRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return c.pool.Begin(ctx)
+}
+
+func (c *ContainerRepo) GetDB() DB {
+	return c.pool
+}
+
 func (r *ContainerRepo) CreateContainer(ctx context.Context, db DB, info ContainerInfo) (string, error) {
 	var id string
 	err := db.QueryRow(ctx, `INSERT INTO container(container_id, project_name, folder_path, port, status , userId)
