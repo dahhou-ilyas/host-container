@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -30,7 +31,11 @@ type ContainerManager struct {
 	client              *client.Client
 	basePath            string
 	repo *ContainerRepo
+	userRepo *UserRepo 
 }
+
+var ErrLimitContainer = errors.New("you reached the number limit of container")
+
 
 func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -47,6 +52,7 @@ func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager,
 		client:     cli,
 		basePath:   basePath,
 		repo: NewContainerRepo(pool),
+		userRepo: NewUserRepo(pool),
 	}, nil
 }
 
@@ -56,6 +62,16 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+
+	_,containers,err := cm.userRepo.GetContainersForUserByID(ctx,tx,project.UserId);
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the user and container: %w", err)
+	}
+
+	if len(containers) > 0 {
+		return nil , ErrLimitContainer
+	}
 
 	folderPath := filepath.Join(cm.basePath, project.Name+"#"+project.ID)
 	log.Printf(folderPath)
@@ -127,6 +143,16 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+
+	_,containers,err := cm.userRepo.GetContainersForUserByID(ctx,tx,project.UserId);
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the user and container: %w", err)
+	}
+
+	if len(containers) > 0 {
+		return nil , ErrLimitContainer
+	}
 
 	folderPath := filepath.Join(cm.basePath, project.Name, project.ID)
 	log.Printf(folderPath)
@@ -371,4 +397,27 @@ func (cm *ContainerManager) pullImageIfNeeded(ctx context.Context, imageName str
 
 func (cm *ContainerManager) Close() error {
 	return cm.client.Close()
+}
+
+
+
+// I use this helpper later in futur
+func (cm *ContainerManager) withTx(ctx context.Context, fn func(tx pgx.Tx) error) (err error) {
+	tx, err := cm.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if err = fn(tx); err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	return err
 }
