@@ -24,11 +24,16 @@ RUN go build -o /app .
 # Final lightweight stage
 FROM alpine:3.21 AS final
 
-# Copy the compiled binary from the builder stage
+RUN addgroup -S -g 1001 appgroup && \
+    adduser -S -u 1001 -G appgroup appuser
+
+RUN apk add --no-cache su-exec
+
 COPY --from=builder /app /bin/app
 
-# Expose the application's port
-EXPOSE 8000
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Run the application
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+EXPOSE 8000
 CMD ["/bin/app"]
