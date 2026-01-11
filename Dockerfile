@@ -29,8 +29,6 @@ RUN addgroup -S -g 1001 appgroup && \
     adduser -S -u 1001 -G appgroup appuser
 
 
-RUN mkdir -p /app && chown -R appuser:appgroup /app
-
 # Copy the compiled binary from the builder stage
 COPY --from=builder --chown=appuser:appgroup /app /bin/app
 
@@ -39,7 +37,6 @@ RUN addgroup -g 999 docker && addgroup appuser docker
 
 
 USER appuser
-
 # Expose the application's port
 EXPOSE 8000
 
