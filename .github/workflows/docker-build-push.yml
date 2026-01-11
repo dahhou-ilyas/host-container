@@ -3,7 +3,6 @@ name: Docker Build & Push to DockerHub
 on:
   push:
     branches:
-      - master
       - main
       - develop
     tags:
