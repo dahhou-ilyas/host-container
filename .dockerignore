@@ -1,0 +1,75 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# GitHub
+.github
+
+# Documentation
+README.md
+LICENSE
+*.md
+
+# Docker files
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDEs and editors
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test files (optional - uncomment if you don't want tests in image)
+# *_test.go
+
+# CI/CD
+.circleci
+.travis.yml
+.gitlab-ci.yml
+
+# Development dependencies
+node_modules/
+vendor/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Monitoring configs (already in docker-compose)
+prometheus.yml
+grafana/
