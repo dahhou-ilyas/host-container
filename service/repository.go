@@ -152,7 +152,22 @@ func (u *UserRepo) GetUserByEmail(ctx context.Context, db DB, email string) (Use
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
 	}
-	return user, err 
+	return user, err
+}
+
+func (u *UserRepo) GetUserByEmailWithPassword(ctx context.Context, db DB, email string) (User, error) {
+	var user User
+
+	err := db.QueryRow(ctx, `
+		SELECT id::text, name, email, password
+		FROM Users
+		WHERE email = $1
+	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, UserNotFound
+	}
+	return user, err
 }
 
 
