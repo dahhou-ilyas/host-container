@@ -2,13 +2,21 @@ package jwtSerivce
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
+var secretKey = getSecretKey()
 
-var secretKey = []byte("secret-key")
+func getSecretKey() []byte {
+	key := os.Getenv("JWT_SECRET_KEY")
+	if key == "" {
+		key = "change-this-secret-key-in-production"
+	}
+	return []byte(key)
+}
 
 
 func CreateToken(username string,email string,userId string) (string, error) {

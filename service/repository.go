@@ -41,10 +41,10 @@ func (c *ContainerRepo) GetDB() DB {
 
 func (r *ContainerRepo) CreateContainer(ctx context.Context, db DB, info ContainerInfo) (string, error) {
 	var id string
-	err := db.QueryRow(ctx, `INSERT INTO container(container_id, project_name, folder_path, port, status , userId)
-		VALUES ($1, $2, $3, $4, $5,$6)
+	err := db.QueryRow(ctx, `INSERT INTO containers(container_id, project_name, folder_path, port, status, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id::text
-	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status,info.UserId).Scan(&id)
+	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, info.UserId).Scan(&id)
 
 	return id, err
 }
@@ -53,7 +53,7 @@ func (r *ContainerRepo) GetContainerByID(ctx context.Context, db DB, id string) 
 	var c ContainerInfo
 	err := db.QueryRow(ctx, `
 		SELECT id::text, container_id, project_name, folder_path, port, status
-		FROM container
+		FROM containers
 		WHERE id = $1::bigint
 	`, id).Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status)
 
@@ -66,7 +66,7 @@ func (r *ContainerRepo) GetContainerByID(ctx context.Context, db DB, id string) 
 func (r *ContainerRepo) UpdateContainer(ctx context.Context, db DB, id string, info ContainerInfo) (ContainerInfo, error) {
 	var updated ContainerInfo
 	err := db.QueryRow(ctx, `
-		UPDATE container
+		UPDATE containers
 		SET container_id = $1, project_name = $2, folder_path = $3, port = $4, status = $5
 		WHERE id = $6::bigint
 		RETURNING id::text, container_id, project_name, folder_path, port, status
@@ -80,7 +80,7 @@ func (r *ContainerRepo) UpdateContainer(ctx context.Context, db DB, id string, i
 }
 
 func (r *ContainerRepo) DeleteContainer(ctx context.Context, db DB, id string) error {
-	tag, err := db.Exec(ctx, `DELETE FROM container WHERE id = $1::bigint`, id)
+	tag, err := db.Exec(ctx, `DELETE FROM containers WHERE id = $1::bigint`, id)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (u *UserRepo) GetDB() DB {
 
 func (u *UserRepo) CreateUser(ctx context.Context, db DB, user User) (string, error) {
 	var id string
-	err := db.QueryRow(ctx, `INSERT INTO Users(name, email, password)
+	err := db.QueryRow(ctx, `INSERT INTO users(name, email, password)
 		VALUES ($1, $2, $3)
 		RETURNING id::text
 	`, user.Name, user.Email, user.Password).Scan(&id)
@@ -130,7 +130,7 @@ func (u *UserRepo) GetUserByID(ctx context.Context, db DB, id string) (User, err
 	var user User
 	err := db.QueryRow(ctx, `
 		SELECT id::text, name, email
-		FROM Users
+		FROM users
 		WHERE id = $1::bigint
 	`, id).Scan(&user.Id, &user.Name, &user.Email)
 
@@ -145,7 +145,7 @@ func (u *UserRepo) GetUserByEmail(ctx context.Context, db DB, email string) (Use
 
 	err := db.QueryRow(ctx, `
 		SELECT id::text, name, email
-		FROM Users
+		FROM users
 		WHERE email = $1
 	`, email).Scan(&user.Id, &user.Name, &user.Email)
 
@@ -160,7 +160,7 @@ func (u *UserRepo) GetUserByEmailWithPassword(ctx context.Context, db DB, email 
 
 	err := db.QueryRow(ctx, `
 		SELECT id::text, name, email, password
-		FROM Users
+		FROM users
 		WHERE email = $1
 	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password)
 
@@ -178,7 +178,7 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 	rows, err := db.Query(ctx, `
 		SELECT
 			u.id::text, u.name, u.email,
-			c.container_id, c.project_id, c.project_name, c.folder_path, c.port::text, c.status
+			c.container_id, c.id::text, c.project_name, c.folder_path, c.port::text, c.status
 		FROM users u
 		LEFT JOIN containers c ON c.user_id = u.id
 		WHERE u.id = $1::bigint

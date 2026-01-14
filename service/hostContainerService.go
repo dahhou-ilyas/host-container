@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -32,10 +33,23 @@ type ContainerManager struct {
 	client              *client.Client
 	basePath            string
 	repo *ContainerRepo
-	userRepo *UserRepo 
+	userRepo *UserRepo
 }
 
-var ErrLimitContainer = errors.New("you reached the number limit of container")
+const DEFAULT_MAX_CONTAINERS_PER_USER = 10
+
+var ErrLimitContainer = errors.New("you reached the number limit of containers")
+
+
+func getMaxContainersPerUser() int {
+	maxContainers := DEFAULT_MAX_CONTAINERS_PER_USER
+	if envMax := os.Getenv("MAX_CONTAINERS_PER_USER"); envMax != "" {
+		if parsed, err := strconv.Atoi(envMax); err == nil && parsed > 0 {
+			maxContainers = parsed
+		}
+	}
+	return maxContainers
+}
 
 
 func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager, error) {
@@ -64,14 +78,15 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 	}
 	defer tx.Rollback(ctx)
 
-	_,containers,err := cm.userRepo.GetContainersForUserByID(ctx,tx,project.UserId);
+	_, containers, err := cm.userRepo.GetContainersForUserByID(ctx, tx, project.UserId)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the user and container: %w", err)
 	}
 
-	if len(containers) > 0 {
-		return nil , ErrLimitContainer
+	maxContainers := getMaxContainersPerUser()
+	if len(containers) >= maxContainers {
+		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
 	}
 
 	folderPath := filepath.Join(cm.basePath, project.Name+"#"+project.ID)
@@ -122,6 +137,7 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		ProjectName: project.Name,
 		FolderPath:  folderPath,
 		Status:      "running",
+		UserId:      project.UserId,
 	}
 
 	id , err := cm.repo.CreateContainer(ctx,tx,*info)
@@ -145,14 +161,15 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 	}
 	defer tx.Rollback(ctx)
 
-	_,containers,err := cm.userRepo.GetContainersForUserByID(ctx,tx,project.UserId);
+	_, containers, err := cm.userRepo.GetContainersForUserByID(ctx, tx, project.UserId)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the user and container: %w", err)
 	}
 
-	if len(containers) > 0 {
-		return nil , ErrLimitContainer
+	maxContainers := getMaxContainersPerUser()
+	if len(containers) >= maxContainers {
+		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
 	}
 
 	folderPath := filepath.Join(cm.basePath, project.Name, project.ID)
@@ -220,6 +237,7 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		FolderPath:  folderPath,
 		Port:        assignedPort,
 		Status:      "running",
+		UserId:      project.UserId,
 	}
 
 	id , err := cm.repo.CreateContainer(ctx,tx,*info)

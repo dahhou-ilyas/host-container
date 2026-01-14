@@ -2,6 +2,7 @@ package main
 
 import (
 	"docker-wrapper/db_config"
+	"docker-wrapper/middlware"
 	"docker-wrapper/service"
 	"log"
 	"net/http"
@@ -194,42 +195,55 @@ func main() {
 		basePath = "/tmp/projects"
 	}
 
-	db_config.Init("localhos postgres")
-	
-	handler, err := service.NewHandler(basePath,db_config.Pool())
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://postgres:postgres@localhost:5432/docker_wrapper?sslmode=disable"
+	}
 
+	if err := db_config.Init(dsn); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	
+	handler, err := service.NewHandler(basePath, db_config.Pool())
 	if err != nil {
 		log.Fatalf("Failed to create handler: %v", err)
 	}
 
-	defer func ()  {
+	userHandler := service.NewUserHandler(db_config.Pool())
+
+	defer func() {
 		handler.Close()
 		db_config.Close()
 	}()
 
 	router := mux.NewRouter()
 
-	router.HandleFunc("/containers", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/auth/login", userHandler.Login)
+	router.HandleFunc("/auth/register", userHandler.Register)
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	router.HandleFunc("/user/me", middlware.AuthMiddleware(userHandler.GetUser))
+	router.HandleFunc("/user/containers", middlware.AuthMiddleware(userHandler.GetUserWithContainers))
+	router.HandleFunc("/user", middlware.AuthMiddleware(userHandler.DeleteUser))
+
+	router.HandleFunc("/containers", middlware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			//handler.ListContainers(w, r)
 		case http.MethodPost:
 			handler.CreateContainer(w, r)
 		default:
-			http.Error(w, "Methode not allowd", http.StatusMethodNotAllowed)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-
-	router.HandleFunc("/containers/get", handler.GetContainer)
-	router.HandleFunc("/containers/start", handler.StartContainer)
-	router.HandleFunc("/containers/stop", handler.StopContainer)
-	router.HandleFunc("/containers/remove", handler.RemoveContainer)
-	router.HandleFunc("/containers/exec", handler.ExecCommand)
-
-	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
-	})
+	}))
+	router.HandleFunc("/containers/get", middlware.AuthMiddleware(handler.GetContainer))
+	router.HandleFunc("/containers/start", middlware.AuthMiddleware(handler.StartContainer))
+	router.HandleFunc("/containers/stop", middlware.AuthMiddleware(handler.StopContainer))
+	router.HandleFunc("/containers/remove", middlware.AuthMiddleware(handler.RemoveContainer))
+	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
 	server := &http.Server{
 		Addr:    ":8000",
