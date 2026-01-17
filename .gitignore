@@ -32,9 +32,6 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Database configuration (may contain sensitive data)
-db_config/
-
 # Environment files
 .env
 .env.local
