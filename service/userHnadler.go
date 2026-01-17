@@ -1,8 +1,8 @@
 package service
 
 import (
-	jwtSerivce "docker-wrapper/jwt"
-	"docker-wrapper/utils"
+	jwtSerivce "github.com/dahhou-ilyas/host-container/jwt"
+	"github.com/dahhou-ilyas/host-container/utils"
 	"encoding/json"
 	"fmt"
 	"net/http"

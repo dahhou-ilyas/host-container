@@ -1,4 +1,4 @@
-module docker-wrapper
+module github.com/dahhou-ilyas/host-container
 
 go 1.25
 
