@@ -90,7 +90,9 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 	}
 
 	folderPath := filepath.Join(cm.basePath, project.Name,project.ID)
-	log.Printf(folderPath)
+	
+	log.Printf("%s", folderPath)
+
 	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("failed to create project folder: %w", err)
 	}

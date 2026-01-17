@@ -159,7 +159,7 @@ func main() {
 	}	
 
 	go func() {
-		log.Printf("Server starting on "+adminAddr)
+		log.Printf("Server starting on %s", adminAddr)
 		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal("admin server error", "err", err)
 			stop()
@@ -168,7 +168,8 @@ func main() {
 
 
 	go func() {
-		log.Printf("Server starting on :"+appAddr)
+		log.Printf("Server starting on %s", appAddr)
+
 		log.Printf("Projects base path: %s", basePath)
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
