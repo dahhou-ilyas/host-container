@@ -1,9 +1,6 @@
 name: Docker Build & Push to DockerHub
 on:
   push:
-    branches:
-      - main
-      - develop
     tags:
       - 'v*'
   pull_request:
@@ -37,7 +34,7 @@ jobs:
         run: go mod verify
 
       - name: Build application
-        run: go build -v -o /tmp/app ./...
+        run: go build -v ./...
 
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
