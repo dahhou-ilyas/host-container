@@ -223,7 +223,7 @@ func (h *Handler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	output, err := h.manager.ExecCommand(ctx, projectID, req.Commande)
-	log.Printf(output)
+	log.Printf("%s",output)
 	if err != nil {
 		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
 		return
