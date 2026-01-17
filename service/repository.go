@@ -116,7 +116,7 @@ func (u *UserRepo) GetDB() DB {
 
 func (u *UserRepo) CreateUser(ctx context.Context, db DB, user User) (string, error) {
 	var id string
-	err := db.QueryRow(ctx, `INSERT INTO users(name, email, password)
+	err := db.QueryRow(ctx, `INSERT INTO users(name, email, password_hash)
 		VALUES ($1, $2, $3)
 		RETURNING id::text
 	`, user.Name, user.Email, user.Password).Scan(&id)
@@ -159,7 +159,7 @@ func (u *UserRepo) GetUserByEmailWithPassword(ctx context.Context, db DB, email 
 	var user User
 
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email, password
+		SELECT id::text, name, email, password_hash
 		FROM users
 		WHERE email = $1
 	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password)
