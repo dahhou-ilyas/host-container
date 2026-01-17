@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"docker-wrapper/db_config"
-	"docker-wrapper/middlware"
-	"docker-wrapper/service"
+	"github.com/dahhou-ilyas/host-container/db_config"
+	"github.com/dahhou-ilyas/host-container/middlware"
+	"github.com/dahhou-ilyas/host-container/service"
 	"errors"
 	"log"
 	"net/http"

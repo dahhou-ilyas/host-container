@@ -2,8 +2,8 @@ package middlware
 
 import (
 	"context"
-	jwtSerivce "docker-wrapper/jwt"
-	"docker-wrapper/utils"
+	jwtSerivce "github.com/dahhou-ilyas/host-container/jwt"
+	"github.com/dahhou-ilyas/host-container/utils"
 	"net/http"
 	"strings"
 )

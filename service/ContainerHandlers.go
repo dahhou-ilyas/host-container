@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"docker-wrapper/utils"
+	"github.com/dahhou-ilyas/host-container/utils"
 	"encoding/json"
 	"log"
 	"net/http"
