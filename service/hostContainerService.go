@@ -89,7 +89,7 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
 	}
 
-	folderPath := filepath.Join(cm.basePath, project.Name+"#"+project.ID)
+	folderPath := filepath.Join(cm.basePath, project.Name,project.ID)
 	log.Printf(folderPath)
 	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("failed to create project folder: %w", err)
