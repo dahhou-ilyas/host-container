@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -90,7 +92,7 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 	}
 
 	folderPath := filepath.Join(cm.basePath, project.Name,project.ID)
-	
+
 	log.Printf("%s", folderPath)
 
 	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
@@ -286,7 +288,7 @@ func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, c
 		return "", fmt.Errorf("failed to read output: %w", err)
 	}
 
-	return string(output), nil
+	return cleanOutput(string(output)), nil
 }
 
 func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) error {
@@ -440,4 +442,14 @@ func (cm *ContainerManager) withTx(ctx context.Context, fn func(tx pgx.Tx) error
 
 	err = tx.Commit(ctx)
 	return err
+}
+
+
+func cleanOutput(input string) string {
+    return strings.Map(func(r rune) rune {
+        if unicode.IsPrint(r) || r == '\n' || r == '\t' {
+            return r
+        }
+        return -1
+    }, input)
 }
