@@ -222,14 +222,20 @@ func (h *Handler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	output, err := h.manager.ExecCommand(ctx, projectID, req.Commande)
-	log.Printf("%s",output)
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, req.Commande)
+
 	if err != nil {
 		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"output": output}}, http.StatusOK)
+	if stderr != "" {
+    	log.Printf("Commande a produit une erreur: %s", stderr)
+		utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"output": stderr}}, http.StatusOK)
+		return
+	}
+
+	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"output": stdout}}, http.StatusOK)
 }
 
 func (h *Handler) Close() error {

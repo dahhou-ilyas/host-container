@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -257,13 +259,13 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 	return info, nil
 }
 
-func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, cmd []string) (string, error) {
+func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, cmd []string) (string, string, error) {
 	info, err := cm.repo.GetContainerByID(ctx,cm.repo.GetDB(),projectID)
 
 
 
 	if err != nil {
-		return "", fmt.Errorf("container not found for project %s", projectID)
+		return "", "", fmt.Errorf("container not found for project %s", projectID)
 	}
 
 	execConfig := container.ExecOptions{
@@ -274,21 +276,23 @@ func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, c
 
 	execID, err := cm.client.ContainerExecCreate(ctx, info.ContainerID, execConfig)
 	if err != nil {
-		return "", fmt.Errorf("failed to create exec: %w", err)
+		return "", "", fmt.Errorf("failed to create exec: %w", err)
 	}
 
 	resp, err := cm.client.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
-		return "", fmt.Errorf("failed to attach exec: %w", err)
+		return "", "", fmt.Errorf("failed to attach exec: %w", err)
 	}
 	defer resp.Close()
 
-	output, err := io.ReadAll(resp.Reader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read output: %w", err)
-	}
+	var stdout, stderr bytes.Buffer
+    _, err = stdcopy.StdCopy(&stdout, &stderr, resp.Reader)
+    if err != nil {
+        return "", "", fmt.Errorf("failed to read output: %w", err)
+    }
 
-	return cleanOutput(string(output)), nil
+    return stdout.String(), stderr.String(), nil
+
 }
 
 func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) error {
