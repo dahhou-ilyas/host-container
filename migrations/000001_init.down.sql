@@ -1,3 +1,6 @@
+BEGIN;
+
+
 CREATE TABLE users (
   id        BIGSERIAL PRIMARY KEY,
   name      TEXT,
@@ -19,3 +22,6 @@ CREATE TABLE containers (
 );
 
 CREATE INDEX idx_containers_user_id ON containers(user_id);
+
+
+COMMIT;
