@@ -1,0 +1,7 @@
+BEGIN;
+
+DROP INDEX IF EXISTS idx_containers_user_id;
+DROP TABLE IF EXISTS containers;
+DROP TABLE IF EXISTS users;
+
+COMMIT;
