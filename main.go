@@ -147,7 +147,7 @@ func main() {
 	router.HandleFunc("/containers/remove", middlware.AuthMiddleware(handler.RemoveContainer))
 	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
-	//router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.ExecCommand))
+	router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.TreeFolder))
 
 	server := &http.Server{
 		Addr:    appAddr,
@@ -268,5 +268,5 @@ func instrumentRoute(routeName string, next http.Handler, m *httpMetrics) http.H
 
 func parseTree(tree string){
 
-	
+
 }

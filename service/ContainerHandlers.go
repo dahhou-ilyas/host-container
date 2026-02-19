@@ -238,6 +238,43 @@ func (h *Handler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"output": stdout}}, http.StatusOK)
 }
 
+
+func (h *Handler) TreeFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		utils.RespondError(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"tree -F ~"})
+
+	if err != nil {
+		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if stderr != "" {
+    	log.Printf("Commande a produit une erreur: %s", stderr)
+		utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"output": stderr}}, http.StatusOK)
+		return
+	}
+
+	node := utils.ParserTreeFolder(stdout);
+
+
+	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: node}, http.StatusOK)
+}
+
 func (h *Handler) Close() error {
 	return h.manager.Close()
 }
