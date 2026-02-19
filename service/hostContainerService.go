@@ -137,6 +137,10 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
+	if err := cm.installPackages(ctx, resp.ID, []string{"tree"}); err != nil {
+		log.Printf("warning: failed to install packages in container %s: %v", resp.ID, err)
+	}
+
 	info := &ContainerInfo{
 		ContainerID: resp.ID,
 		ProjectID:   project.ID,
@@ -222,6 +226,10 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 	if err := cm.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		cm.client.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	if err := cm.installPackages(ctx, resp.ID, []string{"tree"}); err != nil {
+		log.Printf("warning: failed to install packages in container %s: %v", resp.ID, err)
 	}
 
 	// Récupérer le port assigné
@@ -404,6 +412,60 @@ func (cm *ContainerManager) GetContainerInfo(ctx context.Context ,projectID stri
 	return &info, nil
 }
 
+
+func (cm *ContainerManager) execInContainer(ctx context.Context, containerID string, cmd []string) error {
+	execConfig := container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	execID, err := cm.client.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return err
+	}
+	resp, err := cm.client.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
+	if err != nil {
+		return err
+	}
+	defer resp.Close()
+	_, err = io.Copy(io.Discard, resp.Reader)
+	return err
+}
+
+func (cm *ContainerManager) installPackages(ctx context.Context, containerID string, packages []string) error {
+	pkgList := strings.Join(packages, " ")
+
+	// Detect package manager and install
+	installCmds := []struct {
+		check   []string
+		install []string
+	}{
+		{
+			check:   []string{"sh", "-c", "command -v apt-get"},
+			install: []string{"sh", "-c", "apt-get update && apt-get install -y " + pkgList},
+		},
+		{
+			check:   []string{"sh", "-c", "command -v apk"},
+			install: []string{"sh", "-c", "apk add --no-cache " + pkgList},
+		},
+		{
+			check:   []string{"sh", "-c", "command -v yum"},
+			install: []string{"sh", "-c", "yum install -y " + pkgList},
+		},
+		{
+			check:   []string{"sh", "-c", "command -v dnf"},
+			install: []string{"sh", "-c", "dnf install -y " + pkgList},
+		},
+	}
+
+	for _, ic := range installCmds {
+		if err := cm.execInContainer(ctx, containerID, ic.check); err == nil {
+			return cm.execInContainer(ctx, containerID, ic.install)
+		}
+	}
+
+	return fmt.Errorf("no supported package manager found in container %s", containerID)
+}
 
 func (cm *ContainerManager) pullImageIfNeeded(ctx context.Context, imageName string) error {
 	_, _, err := cm.client.ImageInspectWithRaw(ctx, imageName)

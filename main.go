@@ -147,6 +147,8 @@ func main() {
 	router.HandleFunc("/containers/remove", middlware.AuthMiddleware(handler.RemoveContainer))
 	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
+	//router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.ExecCommand))
+
 	server := &http.Server{
 		Addr:    appAddr,
 		Handler: router,
@@ -259,4 +261,12 @@ func instrumentRoute(routeName string, next http.Handler, m *httpMetrics) http.H
 	h = promhttp.InstrumentHandlerDuration(m.reqDuration.MustCurryWith(prometheus.Labels{"handler": routeName}), h)
 
 	return h
+}
+
+
+
+
+func parseTree(tree string){
+
+	
 }
