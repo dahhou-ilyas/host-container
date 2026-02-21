@@ -66,7 +66,7 @@ func main() {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:postgres@localhost:5432/docker_wrapper?sslmode=disable"
+		dsn = "postgres://docker_user:docker_password@localhost:5432/docker_wrapper?sslmode=disable"
 	}
 
 	if err := db_config.Init(dsn); err != nil {

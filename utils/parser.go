@@ -13,26 +13,44 @@ type Node struct {
 }
 
 func ParserTreeFolder(input string) *Node {
+	if strings.TrimSpace(input) == "" {
+		return &Node{Name: ".", Type: "dir", Children: []*Node{}}
+	}
+
 	stack := []*Node{}
 	lines := strings.Split(input, "\n")
 	directorRe := regexp.MustCompile(`^\d+ director`)
 
-	for _, line := range lines {
+	for index, line := range lines {
 		if strings.TrimSpace(line) == "" || directorRe.MatchString(line) {
 			continue
 		}
 
-		if line == "." {
+		if line == "." || index == 0 {
 			root := &Node{Name: ".", Type: "dir", Children: []*Node{}}
 			stack = append(stack, root)
 			continue
 		}
 
 		var connecteurIndex int
+		hasConnector := false
 		if idx := strings.Index(line, "├──"); idx != -1 {
 			connecteurIndex = idx
+			hasConnector = true
 		} else if idx := strings.Index(line, "└──"); idx != -1 {
 			connecteurIndex = idx
+			hasConnector = true
+		}else if idx := strings.Index(line, "|--"); idx != -1 {
+			connecteurIndex = idx
+			hasConnector = true
+		}else if idx := strings.Index(line, "`--"); idx != -1 {
+			connecteurIndex = idx
+			hasConnector = true
+		}
+		
+
+		if !hasConnector || len(stack) == 0 {
+			continue
 		}
 
 		depthString := line[:connecteurIndex]
@@ -82,6 +100,9 @@ func ParserTreeFolder(input string) *Node {
 		}
 	}
 
+	if len(stack) == 0 {
+		return &Node{Name: ".", Type: "dir", Children: []*Node{}}
+	}
 	return stack[0]
 }
 

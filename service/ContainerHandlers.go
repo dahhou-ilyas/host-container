@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/dahhou-ilyas/host-container/utils"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/dahhou-ilyas/host-container/utils"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -256,7 +257,7 @@ func (h *Handler) TreeFolder(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"tree -F ~"})
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"tree", "-F", "/workspace"})
 
 	if err != nil {
 		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
