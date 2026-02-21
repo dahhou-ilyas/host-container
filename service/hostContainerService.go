@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/docker/docker/api/types/container"
@@ -24,20 +25,23 @@ import (
 )
 
 type ContainerInfo struct {
-	ContainerID string `json:"container_id"`
-	ProjectID   string `json:"project_id"`
-	ProjectName string `json:"project_name"`
-	FolderPath  string `json:"folder_path"`
-	Port        string `json:"port,omitempty"`
-	Status      string `json:"status"`
-	UserId      string `json:"userId"`
+	ContainerID string     `json:"container_id"`
+	ProjectID   string     `json:"project_id"`
+	ProjectName string     `json:"project_name"`
+	FolderPath  string     `json:"folder_path"`
+	Port        string     `json:"port,omitempty"`
+	Status      string     `json:"status"`
+	UserId      string     `json:"userId"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
 }
 
 type ContainerManager struct {
-	client              *client.Client
-	basePath            string
-	repo *ContainerRepo
-	userRepo *UserRepo
+	client          *client.Client
+	basePath        string
+	repo            *ContainerRepo
+	userRepo        *UserRepo
+	autoStopTimeout time.Duration
+	stopChan        chan struct{}
 }
 
 const DEFAULT_MAX_CONTAINERS_PER_USER = 10
@@ -56,7 +60,7 @@ func getMaxContainersPerUser() int {
 }
 
 
-func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager, error) {
+func NewContainerManager(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Duration) (*ContainerManager, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
@@ -66,12 +70,13 @@ func NewContainerManager(basePath string,pool *pgxpool.Pool) (*ContainerManager,
 		return nil, fmt.Errorf("failed to create base path: %w", err)
 	}
 
-	// dans cette partie je doit initier le db pool et le passé dans le container manager
 	return &ContainerManager{
-		client:     cli,
-		basePath:   basePath,
-		repo: NewContainerRepo(pool),
-		userRepo: NewUserRepo(pool),
+		client:          cli,
+		basePath:        basePath,
+		repo:            NewContainerRepo(pool),
+		userRepo:        NewUserRepo(pool),
+		autoStopTimeout: autoStopTimeout,
+		stopChan:        make(chan struct{}),
 	}, nil
 }
 
@@ -141,6 +146,7 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		log.Printf("warning: failed to install packages in container %s: %v", resp.ID, err)
 	}
 
+	now := time.Now()
 	info := &ContainerInfo{
 		ContainerID: resp.ID,
 		ProjectID:   project.ID,
@@ -148,6 +154,7 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		FolderPath:  folderPath,
 		Status:      "running",
 		UserId:      project.UserId,
+		StartedAt:   &now,
 	}
 
 	id , err := cm.repo.CreateContainer(ctx,tx,*info)
@@ -243,6 +250,7 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		assignedPort = bindings[0].HostPort
 	}
 
+	now := time.Now()
 	info := &ContainerInfo{
 		ContainerID: resp.ID,
 		ProjectID:   project.ID,
@@ -251,6 +259,7 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		Port:        assignedPort,
 		Status:      "running",
 		UserId:      project.UserId,
+		StartedAt:   &now,
 	}
 
 	id , err := cm.repo.CreateContainer(ctx,tx,*info)
@@ -351,7 +360,9 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
+	now := time.Now()
 	info.Status = "running"
+	info.StartedAt = &now
 
 	_ , err = cm.repo.UpdateContainer(ctx,tx,info.ProjectID,info)
 	if err != nil {
@@ -361,7 +372,7 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -481,6 +492,47 @@ func (cm *ContainerManager) pullImageIfNeeded(ctx context.Context, imageName str
 
 	_, err = io.Copy(io.Discard, reader)
 	return err
+}
+
+func (cm *ContainerManager) StartAutoStopWatcher() {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		log.Printf("Auto-stop watcher started (timeout: %v)", cm.autoStopTimeout)
+		for {
+			select {
+			case <-ticker.C:
+				cm.checkAndStopExpiredContainers()
+			case <-cm.stopChan:
+				ticker.Stop()
+				log.Println("Auto-stop watcher stopped")
+				return
+			}
+		}
+	}()
+}
+
+func (cm *ContainerManager) StopAutoStopWatcher() {
+	close(cm.stopChan)
+}
+
+func (cm *ContainerManager) checkAndStopExpiredContainers() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	containers, err := cm.repo.GetRunningContainersOlderThan(ctx, cm.repo.GetDB(), cm.autoStopTimeout)
+	if err != nil {
+		log.Printf("Auto-stop watcher: failed to query expired containers: %v", err)
+		return
+	}
+
+	for _, c := range containers {
+		log.Printf("Auto-stop watcher: stopping container %s (project %s), running since %v", c.ContainerID, c.ProjectID, c.StartedAt)
+		if err := cm.StopContainer(ctx, c.ProjectID); err != nil {
+			log.Printf("Auto-stop watcher: failed to stop container %s: %v", c.ProjectID, err)
+		} else {
+			log.Printf("Auto-stop watcher: successfully stopped container %s", c.ProjectID)
+		}
+	}
 }
 
 func (cm *ContainerManager) Close() error {
