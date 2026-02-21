@@ -69,18 +69,30 @@ func main() {
 		dsn = "postgres://docker_user:docker_password@localhost:5432/docker_wrapper?sslmode=disable"
 	}
 
+	autoStopTimeoutStr := os.Getenv("CONTAINER_AUTO_STOP_TIMEOUT")
+	if autoStopTimeoutStr == "" {
+		autoStopTimeoutStr = "30m"
+	}
+	autoStopTimeout, err := time.ParseDuration(autoStopTimeoutStr)
+	if err != nil {
+		log.Fatalf("Invalid CONTAINER_AUTO_STOP_TIMEOUT value %q: %v", autoStopTimeoutStr, err)
+	}
+
 	if err := db_config.Init(dsn); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	
-	handler, err := service.NewHandler(basePath, db_config.Pool())
+
+	handler, err := service.NewHandler(basePath, db_config.Pool(), autoStopTimeout)
 	if err != nil {
 		log.Fatalf("Failed to create handler: %v", err)
 	}
 
 	userHandler := service.NewUserHandler(db_config.Pool())
 
+	handler.StartAutoStopWatcher()
+
 	defer func() {
+		handler.StopAutoStopWatcher()
 		handler.Close()
 		db_config.Close()
 	}()

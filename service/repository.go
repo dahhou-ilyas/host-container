@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,10 +42,10 @@ func (c *ContainerRepo) GetDB() DB {
 
 func (r *ContainerRepo) CreateContainer(ctx context.Context, db DB, info ContainerInfo) (string, error) {
 	var id string
-	err := db.QueryRow(ctx, `INSERT INTO containers(container_id, project_name, folder_path, port, status, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+	err := db.QueryRow(ctx, `INSERT INTO containers(container_id, project_name, folder_path, port, status, user_id, started_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id::text
-	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, info.UserId).Scan(&id)
+	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, info.UserId, info.StartedAt).Scan(&id)
 
 	return id, err
 }
@@ -52,10 +53,10 @@ func (r *ContainerRepo) CreateContainer(ctx context.Context, db DB, info Contain
 func (r *ContainerRepo) GetContainerByID(ctx context.Context, db DB, id string) (ContainerInfo, error) {
 	var c ContainerInfo
 	err := db.QueryRow(ctx, `
-		SELECT id::text, container_id, project_name, folder_path, port, status
+		SELECT id::text, container_id, project_name, folder_path, port, status, started_at
 		FROM containers
 		WHERE id = $1::bigint
-	`, id).Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status)
+	`, id).Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status, &c.StartedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ContainerInfo{}, ErrNotFound
@@ -67,11 +68,11 @@ func (r *ContainerRepo) UpdateContainer(ctx context.Context, db DB, id string, i
 	var updated ContainerInfo
 	err := db.QueryRow(ctx, `
 		UPDATE containers
-		SET container_id = $1, project_name = $2, folder_path = $3, port = $4, status = $5
+		SET container_id = $1, project_name = $2, folder_path = $3, port = $4, status = $5, started_at = $7
 		WHERE id = $6::bigint
-		RETURNING id::text, container_id, project_name, folder_path, port, status
-	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, id).
-		Scan(&updated.ProjectID, &updated.ContainerID, &updated.ProjectName, &updated.FolderPath, &updated.Port, &updated.Status)
+		RETURNING id::text, container_id, project_name, folder_path, port, status, started_at
+	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, id, info.StartedAt).
+		Scan(&updated.ProjectID, &updated.ContainerID, &updated.ProjectName, &updated.FolderPath, &updated.Port, &updated.Status, &updated.StartedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ContainerInfo{}, ErrNotFound
@@ -90,6 +91,28 @@ func (r *ContainerRepo) DeleteContainer(ctx context.Context, db DB, id string) e
 	return nil
 }
 
+func (r *ContainerRepo) GetRunningContainersOlderThan(ctx context.Context, db DB, maxAge time.Duration) ([]ContainerInfo, error) {
+	cutoff := time.Now().Add(-maxAge)
+	rows, err := db.Query(ctx, `
+		SELECT id::text, container_id, project_name, folder_path, port, status, started_at
+		FROM containers
+		WHERE status = 'running' AND started_at IS NOT NULL AND started_at < $1
+	`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var containers []ContainerInfo
+	for rows.Next() {
+		var c ContainerInfo
+		if err := rows.Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status, &c.StartedAt); err != nil {
+			return nil, err
+		}
+		containers = append(containers, c)
+	}
+	return containers, rows.Err()
+}
 
 
 

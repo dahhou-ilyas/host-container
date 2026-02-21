@@ -35,12 +35,20 @@ type Handler struct {
 	manager *ContainerManager
 }
 
-func NewHandler(basePath string, pool *pgxpool.Pool) (*Handler, error) {
-	manager, err := NewContainerManager(basePath,pool)
+func NewHandler(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Duration) (*Handler, error) {
+	manager, err := NewContainerManager(basePath, pool, autoStopTimeout)
 	if err != nil {
 		return nil, err
 	}
 	return &Handler{manager: manager}, nil
+}
+
+func (h *Handler) StartAutoStopWatcher() {
+	h.manager.StartAutoStopWatcher()
+}
+
+func (h *Handler) StopAutoStopWatcher() {
+	h.manager.StopAutoStopWatcher()
 }
 
 func (h *Handler) CreateContainer(w http.ResponseWriter, r *http.Request) {
