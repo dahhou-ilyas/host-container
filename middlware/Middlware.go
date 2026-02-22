@@ -9,37 +9,42 @@ import (
 )
 
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			utils.RespondError(w, "authorization header required", http.StatusUnauthorized)
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var tokenString string
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			utils.RespondError(w, "invalid authorization header format", http.StatusUnauthorized)
-			return
-		}
+        authHeader := r.Header.Get("Authorization")
+        if authHeader != "" {
+            parts := strings.Split(authHeader, " ")
+            if len(parts) != 2 || parts[0] != "Bearer" {
+                utils.RespondError(w, "invalid authorization header format", http.StatusUnauthorized)
+                return
+            }
+            tokenString = parts[1]
+        }
 
-		tokenString := parts[1]
+        if tokenString == "" {
+            tokenString = r.URL.Query().Get("token")
+        }
 
-		err := jwtSerivce.VerifyToken(tokenString)
+        if tokenString == "" {
+            utils.RespondError(w, "authorization required", http.StatusUnauthorized)
+            return
+        }
 
-		if err != nil {
-			utils.RespondError(w, "invalid Token", http.StatusUnauthorized)
-			return
-		}
+        if err := jwtSerivce.VerifyToken(tokenString); err != nil {
+            utils.RespondError(w, "invalid token", http.StatusUnauthorized)
+            return
+        }
 
-		userId, err := jwtSerivce.GetUserIDFromToken(tokenString)
-		if err != nil {
-			utils.RespondError(w, "invalid or expired token", http.StatusUnauthorized)
-			return
-		}
+        userId, err := jwtSerivce.GetUserIDFromToken(tokenString)
+        if err != nil {
+            utils.RespondError(w, "invalid or expired token", http.StatusUnauthorized)
+            return
+        }
 
-		ctx := context.WithValue(r.Context(), utils.UserIDKey, userId)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	}
+        ctx := context.WithValue(r.Context(), utils.UserIDKey, userId)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    }
 }
 
 
