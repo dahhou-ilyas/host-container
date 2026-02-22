@@ -54,11 +54,14 @@ func (mh *MetricHandler) WsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	decoder , err := mh.containerManager.GetMetricOfContainer(ctx,containerID,conn);
+	decoder , ioReader , err := mh.containerManager.GetMetricOfContainer(ctx,containerID,conn);
+
 
 	if err != nil {
 		return
 	}
+
+	defer ioReader.Close()
 
 
 	for {
