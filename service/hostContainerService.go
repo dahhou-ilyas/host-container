@@ -537,17 +537,16 @@ func (cm *ContainerManager) checkAndStopExpiredContainers() {
 	}
 }
 
-func (cm *ContainerManager) GetMetricOfContainer(ctx context.Context, containerID string,conn *websocket.Conn) (*json.Decoder,error) {
+func (cm *ContainerManager) GetMetricOfContainer(ctx context.Context, containerID string,conn *websocket.Conn) (*json.Decoder,io.ReadCloser,error) {
 	stats, err := cm.client.ContainerStats(ctx, containerID, true)
 
 	if err != nil {
-		return nil,fmt.Errorf("failed to GET METRIC OF THE CONTAINER: %w", err)
+		return nil,nil,fmt.Errorf("failed to GET METRIC OF THE CONTAINER: %w", err)
     }
-    defer stats.Body.Close()
 
 	decoder := json.NewDecoder(stats.Body);
 
-	return decoder,nil
+	return decoder,stats.Body,nil
 }
 
 
