@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/moby/moby/client"
@@ -534,6 +536,20 @@ func (cm *ContainerManager) checkAndStopExpiredContainers() {
 		}
 	}
 }
+
+func (cm *ContainerManager) GetMetricOfContainer(ctx context.Context, containerID string,conn *websocket.Conn) (*json.Decoder,error) {
+	stats, err := cm.client.ContainerStats(ctx, containerID, true)
+
+	if err != nil {
+		return nil,fmt.Errorf("failed to GET METRIC OF THE CONTAINER: %w", err)
+    }
+    defer stats.Body.Close()
+
+	decoder := json.NewDecoder(stats.Body);
+
+	return decoder,nil
+}
+
 
 func (cm *ContainerManager) Close() error {
 	return cm.client.Close()

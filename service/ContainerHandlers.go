@@ -43,6 +43,10 @@ func NewHandler(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Durati
 	return &Handler{manager: manager}, nil
 }
 
+func (h *Handler) Manager() *ContainerManager {
+	return h.manager
+}
+
 func (h *Handler) StartAutoStopWatcher() {
 	h.manager.StartAutoStopWatcher()
 }

@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/dahhou-ilyas/host-container/db_config"
-	"github.com/dahhou-ilyas/host-container/middlware"
-	"github.com/dahhou-ilyas/host-container/service"
 	"errors"
 	"log"
 	"net/http"
@@ -14,6 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dahhou-ilyas/host-container/db_config"
+	"github.com/dahhou-ilyas/host-container/middlware"
+	"github.com/dahhou-ilyas/host-container/service"
+	"github.com/dahhou-ilyas/host-container/websocket"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -160,6 +161,12 @@ func main() {
 	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
 	router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.TreeFolder))
+
+	metricHandler, err := websocket.NewMetricHandler(handler.Manager())
+	if err != nil {
+		log.Fatalf("Failed to create metric handler: %v", err)
+	}
+	router.HandleFunc("/ws", middlware.AuthMiddleware(metricHandler.WsHandler))
 
 	server := &http.Server{
 		Addr:    appAddr,
