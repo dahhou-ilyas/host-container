@@ -291,3 +291,44 @@ func (u *UserRepo) DeleteUserByID(ctx context.Context, db DB, userId string) err
 	}
 	return nil
 }
+
+
+
+// -----------------------------------------  IMAGES REPOSITORY -----------------------------------------
+
+type ImageRepo struct {
+	pool *pgxpool.Pool
+}
+
+func NewImageRepo(pool *pgxpool.Pool) *ImageRepo {
+	return &ImageRepo{pool: pool}
+}
+
+func (i *ImageRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return i.pool.Begin(ctx)
+}
+
+func (i *ImageRepo) GetDB() DB {
+	return i.pool
+}
+
+func (i *ImageRepo) GetImages(ctx context.Context,db DB) ([]ImageInfo, error) {
+	rows, err := db.Query(ctx, `
+		SELECT id, name, tag, created_at
+		FROM images
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	images := make([]ImageInfo, 0);
+	for rows.Next() {
+		var img ImageInfo
+		if err := rows.Scan(&img.ID, &img.Name, &img.Tag, &img.CreatedAt); err != nil {
+			return nil, err
+		}
+		images = append(images, img)
+	}
+	return images, rows.Err()
+}
