@@ -1,0 +1,2 @@
+ALTER TABLE containers ADD COLUMN image_name TEXT;
+ALTER TABLE containers ADD COLUMN created_at TIMESTAMP DEFAULT NOW();

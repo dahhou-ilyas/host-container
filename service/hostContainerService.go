@@ -30,11 +30,13 @@ type ContainerInfo struct {
 	ContainerID string     `json:"container_id"`
 	ProjectID   string     `json:"project_id"`
 	ProjectName string     `json:"project_name"`
+	ImageName   string     `json:"image_name"`
 	FolderPath  string     `json:"folder_path"`
 	Port        string     `json:"port,omitempty"`
 	Status      string     `json:"status"`
 	UserId      string     `json:"userId"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
 }
 
 type ContainerManager struct {
@@ -153,10 +155,12 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		ContainerID: resp.ID,
 		ProjectID:   project.ID,
 		ProjectName: project.Name,
+		ImageName:   imageName,
 		FolderPath:  folderPath,
 		Status:      "running",
 		UserId:      project.UserId,
 		StartedAt:   &now,
+		CreatedAt:   &now,
 	}
 
 	id , err := cm.repo.CreateContainer(ctx,tx,*info)
@@ -257,11 +261,13 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		ContainerID: resp.ID,
 		ProjectID:   project.ID,
 		ProjectName: project.Name,
+		ImageName:   imageName,
 		FolderPath:  folderPath,
 		Port:        assignedPort,
 		Status:      "running",
 		UserId:      project.UserId,
 		StartedAt:   &now,
+		CreatedAt:   &now,
 	}
 
 	id , err := cm.repo.CreateContainer(ctx,tx,*info)
