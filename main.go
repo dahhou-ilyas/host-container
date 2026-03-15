@@ -161,6 +161,8 @@ func main() {
 	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
 	router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.TreeFolder))
+	router.HandleFunc("/containers/file/read", middlware.AuthMiddleware(handler.ReadFile))
+	router.HandleFunc("/containers/file/write", middlware.AuthMiddleware(handler.WriteFile))
 
 	metricHandler, err := websocket.NewMetricHandler(handler.Manager())
 	if err != nil {
