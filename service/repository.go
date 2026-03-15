@@ -42,10 +42,10 @@ func (c *ContainerRepo) GetDB() DB {
 
 func (r *ContainerRepo) CreateContainer(ctx context.Context, db DB, info ContainerInfo) (string, error) {
 	var id string
-	err := db.QueryRow(ctx, `INSERT INTO containers(container_id, project_name, folder_path, port, status, user_id, started_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	err := db.QueryRow(ctx, `INSERT INTO containers(container_id, project_name, folder_path, port, status, user_id, started_at, image_name)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id::text
-	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, info.UserId, info.StartedAt).Scan(&id)
+	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, info.UserId, info.StartedAt, info.ImageName).Scan(&id)
 
 	return id, err
 }
@@ -53,10 +53,10 @@ func (r *ContainerRepo) CreateContainer(ctx context.Context, db DB, info Contain
 func (r *ContainerRepo) GetContainerByID(ctx context.Context, db DB, id string) (ContainerInfo, error) {
 	var c ContainerInfo
 	err := db.QueryRow(ctx, `
-		SELECT id::text, container_id, project_name, folder_path, port, status, started_at
+		SELECT id::text, container_id, project_name, folder_path, port, status, started_at, image_name, created_at
 		FROM containers
 		WHERE id = $1::bigint
-	`, id).Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status, &c.StartedAt)
+	`, id).Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status, &c.StartedAt, &c.ImageName, &c.CreatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ContainerInfo{}, ErrNotFound
@@ -68,11 +68,11 @@ func (r *ContainerRepo) UpdateContainer(ctx context.Context, db DB, id string, i
 	var updated ContainerInfo
 	err := db.QueryRow(ctx, `
 		UPDATE containers
-		SET container_id = $1, project_name = $2, folder_path = $3, port = $4, status = $5, started_at = $7
+		SET container_id = $1, project_name = $2, folder_path = $3, port = $4, status = $5, started_at = $7, image_name = $8
 		WHERE id = $6::bigint
-		RETURNING id::text, container_id, project_name, folder_path, port, status, started_at
-	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, id, info.StartedAt).
-		Scan(&updated.ProjectID, &updated.ContainerID, &updated.ProjectName, &updated.FolderPath, &updated.Port, &updated.Status, &updated.StartedAt)
+		RETURNING id::text, container_id, project_name, folder_path, port, status, started_at, image_name, created_at
+	`, info.ContainerID, info.ProjectName, info.FolderPath, info.Port, info.Status, id, info.StartedAt, info.ImageName).
+		Scan(&updated.ProjectID, &updated.ContainerID, &updated.ProjectName, &updated.FolderPath, &updated.Port, &updated.Status, &updated.StartedAt, &updated.ImageName, &updated.CreatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ContainerInfo{}, ErrNotFound
@@ -94,7 +94,7 @@ func (r *ContainerRepo) DeleteContainer(ctx context.Context, db DB, id string) e
 func (r *ContainerRepo) GetRunningContainersOlderThan(ctx context.Context, db DB, maxAge time.Duration) ([]ContainerInfo, error) {
 	cutoff := time.Now().Add(-maxAge)
 	rows, err := db.Query(ctx, `
-		SELECT id::text, container_id, project_name, folder_path, port, status, started_at
+		SELECT id::text, container_id, project_name, folder_path, port, status, started_at, image_name, created_at
 		FROM containers
 		WHERE status = 'running' AND started_at IS NOT NULL AND started_at < $1
 	`, cutoff)
@@ -106,7 +106,7 @@ func (r *ContainerRepo) GetRunningContainersOlderThan(ctx context.Context, db DB
 	var containers []ContainerInfo
 	for rows.Next() {
 		var c ContainerInfo
-		if err := rows.Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status, &c.StartedAt); err != nil {
+		if err := rows.Scan(&c.ProjectID, &c.ContainerID, &c.ProjectName, &c.FolderPath, &c.Port, &c.Status, &c.StartedAt, &c.ImageName, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		containers = append(containers, c)
@@ -201,7 +201,7 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 	rows, err := db.Query(ctx, `
 		SELECT
 			u.id::text, u.name, u.email,
-			c.container_id, c.id::text, c.project_name, c.folder_path, c.port::text, c.status
+			c.container_id, c.id::text, c.project_name, c.folder_path, c.port::text, c.status, c.image_name, c.created_at
 		FROM users u
 		LEFT JOIN containers c ON c.user_id = u.id
 		WHERE u.id = $1::bigint
@@ -219,11 +219,12 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 
 		var uid, name, email string
 
-		var containerID, projectID, projectName, folderPath, port, status *string
+		var containerID, projectID, projectName, folderPath, port, status, imageName *string
+		var createdAt *time.Time
 
 		if err := rows.Scan(
 			&uid, &name, &email,
-			&containerID, &projectID, &projectName, &folderPath, &port, &status,
+			&containerID, &projectID, &projectName, &folderPath, &port, &status, &imageName, &createdAt,
 		); err != nil {
 			return User{}, nil, err
 		}
@@ -242,6 +243,7 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 		c := ContainerInfo{
 			ContainerID: *containerID,
 			UserId:      uid,
+			CreatedAt:   createdAt,
 		}
 		if projectID != nil {
 			c.ProjectID = *projectID
@@ -257,6 +259,9 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 		}
 		if status != nil {
 			c.Status = *status
+		}
+		if imageName != nil {
+			c.ImageName = *imageName
 		}
 
 		containers = append(containers, c)
