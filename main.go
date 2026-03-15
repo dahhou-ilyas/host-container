@@ -62,7 +62,7 @@ func main() {
 
 	basePath := os.Getenv("PROJECTS_BASE_PATH")
 	if basePath == "" {
-		basePath = "/Users/ilyasdahhou/Downloads/docker-wrapper/projectExemple"
+		basePath = "/Users/ilyasdahhou/Downloads/dock_wrp_pr/docker-wrapper/projectExemple"
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
