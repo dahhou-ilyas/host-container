@@ -288,6 +288,91 @@ func (h *Handler) TreeFolder(w http.ResponseWriter, r *http.Request) {
 	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: node}, http.StatusOK)
 }
 
+type ReadFileRequest struct {
+	Path string `json:"path"`
+}
+
+type WriteFileRequest struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+func (h *Handler) ReadFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		utils.RespondError(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		utils.RespondError(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"cat", filePath})
+	if err != nil {
+		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if stderr != "" {
+		utils.RespondError(w, stderr, http.StatusNotFound)
+		return
+	}
+
+	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"content": stdout}}, http.StatusOK)
+}
+
+func (h *Handler) WriteFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		utils.RespondError(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	var req WriteFileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		utils.RespondError(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	// Use sh -c with printf to safely write content (handles special characters)
+	_, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"sh", "-c", "cat > " + req.Path + " << 'CODEDOCK_EOF'\n" + req.Content + "\nCODEDOCK_EOF"})
+	if err != nil {
+		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if stderr != "" {
+		utils.RespondError(w, stderr, http.StatusInternalServerError)
+		return
+	}
+
+	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: "file saved"}, http.StatusOK)
+}
+
 func (h *Handler) Close() error {
 	return h.manager.Close()
 }

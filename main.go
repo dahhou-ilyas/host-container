@@ -62,7 +62,7 @@ func main() {
 
 	basePath := os.Getenv("PROJECTS_BASE_PATH")
 	if basePath == "" {
-		basePath = "/Users/ilyasdahhou/Downloads/docker-wrapper/projectExemple"
+		basePath = "/Users/ilyasdahhou/Downloads/dock_wrp_pr/docker-wrapper/projectExemple"
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -161,6 +161,8 @@ func main() {
 	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
 	router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.TreeFolder))
+	router.HandleFunc("/containers/file/read", middlware.AuthMiddleware(handler.ReadFile))
+	router.HandleFunc("/containers/file/write", middlware.AuthMiddleware(handler.WriteFile))
 
 	metricHandler, err := websocket.NewMetricHandler(handler.Manager())
 	if err != nil {
