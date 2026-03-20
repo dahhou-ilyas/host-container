@@ -330,7 +330,7 @@ func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, c
 
 }
 
-func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) (err error) {
+func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) error {
 	tx, err := cm.repo.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -342,25 +342,20 @@ func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string)
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
-	timeout := 10
-	if err = cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout}); err != nil {
-		return fmt.Errorf("failed to stop container: %w", err)
-	}
-	// Compensation : si la DB échoue, on redémarre le container
-	defer func() {
-		if err != nil {
-			if startErr := cm.client.ContainerStart(ctx, info.ContainerID, container.StartOptions{}); startErr != nil {
-				log.Printf("rollback failed: could not restart container %s: %v", info.ContainerID, startErr)
-			}
-		}
-	}()
-
+	// Update DB (pas encore committed)
 	info.Status = "stopped"
 	_, err = cm.repo.UpdateContainer(ctx, tx, info.ProjectID, info)
 	if err != nil {
 		return err
 	}
 
+	// Stop Docker — si ça échoue, defer tx.Rollback() annule le changement DB
+	timeout := 10
+	if err := cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	// Tout a réussi → commit
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
@@ -368,7 +363,7 @@ func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string)
 	return nil
 }
 
-func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string) (err error) {
+func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string) error {
 	tx, err := cm.repo.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -380,19 +375,7 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
-	if err = cm.client.ContainerStart(ctx, info.ContainerID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("failed to start container: %w", err)
-	}
-	// Compensation : si la DB échoue, on re-stoppe le container
-	defer func() {
-		if err != nil {
-			timeout := 10
-			if stopErr := cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout}); stopErr != nil {
-				log.Printf("rollback failed: could not stop container %s: %v", info.ContainerID, stopErr)
-			}
-		}
-	}()
-
+	// Update DB (pas encore committed)
 	now := time.Now()
 	info.Status = "running"
 	info.StartedAt = &now
@@ -402,6 +385,12 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string
 		return err
 	}
 
+	// Start Docker — si ça échoue, defer tx.Rollback() annule le changement DB
+	if err := cm.client.ContainerStart(ctx, info.ContainerID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// Tout a réussi → commit
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
