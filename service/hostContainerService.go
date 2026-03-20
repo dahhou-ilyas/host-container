@@ -84,7 +84,7 @@ func NewContainerManager(basePath string, pool *pgxpool.Pool, autoStopTimeout ti
 	}, nil
 }
 
-func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project, imageName string) (*ContainerInfo, error) {
+func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project, imageName string) (_ *ContainerInfo, err error) {
 	tx, err := cm.repo.BeginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -102,23 +102,25 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
 	}
 
-	folderPath := filepath.Join(cm.basePath, project.Name,project.ID)
-
-	log.Printf("%s", folderPath)
-
-	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
-		return nil, fmt.Errorf("failed to create project folder: %w", err)
-	}
-
-	if err := cm.pullImageIfNeeded(ctx, imageName); err != nil {
+	if err = cm.pullImageIfNeeded(ctx, imageName); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
+
+	folderPath := filepath.Join(cm.basePath, project.Name, project.ID)
+	if err = os.MkdirAll(folderPath, os.ModePerm); err != nil {
+		return nil, fmt.Errorf("failed to create project folder: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(folderPath)
+		}
+	}()
 
 	containerConfig := &container.Config{
 		Image:      imageName,
 		Tty:        true,
 		WorkingDir: "/workspace",
-		Cmd:        []string{"/bin/sh"}, // Shell par défaut
+		Cmd:        []string{"/bin/sh"},
 	}
 
 	hostConfig := &container.HostConfig{
@@ -130,8 +132,8 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 			},
 		},
 		Resources: container.Resources{
-			Memory:   512 * 1024 * 1024, // 512 MB
-			NanoCPUs: 1000000000,        // 1 CPU
+			Memory:   512 * 1024 * 1024,
+			NanoCPUs: 1000000000,
 		},
 		AutoRemove: false,
 	}
@@ -140,14 +142,19 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			cm.client.ContainerStop(ctx, resp.ID, container.StopOptions{})
+			cm.client.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		}
+	}()
 
-	if err := cm.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		cm.client.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+	if err = cm.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	if err := cm.installPackages(ctx, resp.ID, []string{"tree"}); err != nil {
-		log.Printf("warning: failed to install packages in container %s: %v", resp.ID, err)
+	if pkgErr := cm.installPackages(ctx, resp.ID, []string{"tree"}); pkgErr != nil {
+		log.Printf("warning: failed to install packages in container %s: %v", resp.ID, pkgErr)
 	}
 
 	now := time.Now()
@@ -163,17 +170,16 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		CreatedAt:   &now,
 	}
 
-	id , err := cm.repo.CreateContainer(ctx,tx,*info)
+	id, err := cm.repo.CreateContainer(ctx, tx, *info)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 
 	info.ProjectID = id
-
 	return info, nil
 }
 
@@ -195,13 +201,15 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
 	}
 
-	folderPath := filepath.Join(cm.basePath, project.Name, project.ID)
-	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
-		return nil, fmt.Errorf("failed to create project folder: %w", err)
-	}
+	
 
 	if err := cm.pullImageIfNeeded(ctx, imageName); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
+	}
+
+	folderPath := filepath.Join(cm.basePath, project.Name, project.ID)
+	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
+		return nil, fmt.Errorf("failed to create project folder: %w", err)
 	}
 
 	exposedPort := nat.Port(containerPort + "/tcp")
@@ -233,11 +241,13 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 
 	resp, err := cm.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
 	if err != nil {
+		removeFolderRollBack(folderPath)
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
 	if err := cm.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		cm.client.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		removeFolderRollBack(folderPath)
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
@@ -320,64 +330,79 @@ func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, c
 
 }
 
-func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) error {
+func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) (err error) {
 	tx, err := cm.repo.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	info, err := cm.repo.GetContainerByID(ctx,cm.repo.GetDB(),projectID)
-	if err  != nil{
+	info, err := cm.repo.GetContainerByID(ctx, cm.repo.GetDB(), projectID)
+	if err != nil {
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
 	timeout := 10
-	if err := cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout}); err != nil {
+	if err = cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
+	// Compensation : si la DB échoue, on redémarre le container
+	defer func() {
+		if err != nil {
+			if startErr := cm.client.ContainerStart(ctx, info.ContainerID, container.StartOptions{}); startErr != nil {
+				log.Printf("rollback failed: could not restart container %s: %v", info.ContainerID, startErr)
+			}
+		}
+	}()
 
 	info.Status = "stopped"
-
-	
-	_ , err = cm.repo.UpdateContainer(ctx,tx,info.ProjectID,info)
+	_, err = cm.repo.UpdateContainer(ctx, tx, info.ProjectID, info)
 	if err != nil {
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string) error {
+func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string) (err error) {
 	tx, err := cm.repo.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	info, err := cm.repo.GetContainerByID(ctx,cm.repo.GetDB(),projectID)
+	info, err := cm.repo.GetContainerByID(ctx, cm.repo.GetDB(), projectID)
 	if err != nil {
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
-	if err := cm.client.ContainerStart(ctx, info.ContainerID, container.StartOptions{}); err != nil {
+	if err = cm.client.ContainerStart(ctx, info.ContainerID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
+	// Compensation : si la DB échoue, on re-stoppe le container
+	defer func() {
+		if err != nil {
+			timeout := 10
+			if stopErr := cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout}); stopErr != nil {
+				log.Printf("rollback failed: could not stop container %s: %v", info.ContainerID, stopErr)
+			}
+		}
+	}()
 
 	now := time.Now()
 	info.Status = "running"
 	info.StartedAt = &now
 
-	_ , err = cm.repo.UpdateContainer(ctx,tx,info.ProjectID,info)
+	_, err = cm.repo.UpdateContainer(ctx, tx, info.ProjectID, info)
 	if err != nil {
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
 
@@ -391,31 +416,33 @@ func (cm *ContainerManager) RemoveContainer(ctx context.Context, projectID strin
 	}
 	defer tx.Rollback(ctx)
 
-	info, err := cm.repo.GetContainerByID(ctx,tx,projectID)
-	if err != nil{
+	info, err := cm.repo.GetContainerByID(ctx, tx, projectID)
+	if err != nil {
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
-	timeout := 5
-	cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout})
-
-	if err := cm.client.ContainerRemove(ctx, info.ContainerID, container.RemoveOptions{Force: true}); err != nil {
-		return fmt.Errorf("failed to remove container: %w", err)
-	}
-
-	if removeFolder {
-		if err := os.RemoveAll(info.FolderPath); err != nil {
-			return fmt.Errorf("failed to remove folder: %w", err)
-		}
-	}
-	err = cm.repo.DeleteContainer(ctx,tx,projectID)
-
-	if err!=nil {
+	// DB d'abord (réversible via rollback)
+	err = cm.repo.DeleteContainer(ctx, tx, projectID)
+	if err != nil {
 		return err
 	}
 
 	if err = tx.Commit(ctx); err != nil {
 		return err
+	}
+
+	// Après commit : cleanup Docker + filesystem (best-effort, loguer les erreurs)
+	timeout := 5
+	cm.client.ContainerStop(ctx, info.ContainerID, container.StopOptions{Timeout: &timeout})
+
+	if err := cm.client.ContainerRemove(ctx, info.ContainerID, container.RemoveOptions{Force: true}); err != nil {
+		log.Printf("WARNING: orphan container %s needs manual cleanup: %v", info.ContainerID, err)
+	}
+
+	if removeFolder {
+		if err := os.RemoveAll(info.FolderPath); err != nil {
+			log.Printf("WARNING: orphan folder %s needs manual cleanup: %v", info.FolderPath, err)
+		}
 	}
 
 	return nil
@@ -591,4 +618,11 @@ func cleanOutput(input string) string {
         }
         return -1
     }, input)
+}
+
+func removeFolderRollBack(folderPath string) error{
+	if err := os.RemoveAll(folderPath); err != nil {
+		return fmt.Errorf("failed to remove project folder: %w", err)
+	}
+	return nil
 }
