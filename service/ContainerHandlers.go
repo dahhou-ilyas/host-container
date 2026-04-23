@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dahhou-ilyas/host-container/utils"
@@ -315,10 +317,17 @@ func (h *Handler) ReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prevent path traversal: path must be within /workspace
+	cleanPath := filepath.Clean(filePath)
+	if !strings.HasPrefix(cleanPath, "/workspace") {
+		utils.RespondError(w, "access denied: path must be within /workspace", http.StatusForbidden)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"cat", filePath})
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"cat", cleanPath})
 	if err != nil {
 		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -355,18 +364,19 @@ func (h *Handler) WriteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	// Use sh -c with printf to safely write content (handles special characters)
-	_, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"sh", "-c", "cat > " + req.Path + " << 'CODEDOCK_EOF'\n" + req.Content + "\nCODEDOCK_EOF"})
-	if err != nil {
-		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
+	// Prevent path traversal: path must be within /workspace
+	cleanPath := filepath.Clean(req.Path)
+	if !strings.HasPrefix(cleanPath, "/workspace") {
+		utils.RespondError(w, "access denied: path must be within /workspace", http.StatusForbidden)
 		return
 	}
 
-	if stderr != "" {
-		utils.RespondError(w, stderr, http.StatusInternalServerError)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	// Use Docker CopyToContainer (tar stream) to avoid shell command injection
+	if err := h.manager.WriteFileToContainer(ctx, projectID, cleanPath, req.Content); err != nil {
+		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

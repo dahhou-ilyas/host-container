@@ -2,8 +2,10 @@ package websocket
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/dahhou-ilyas/host-container/service"
@@ -13,9 +15,26 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var allowedWsOrigins = parseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS"))
+
+func parseAllowedOrigins(raw string) map[string]bool {
+	set := make(map[string]bool)
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			set[o] = true
+		}
+	}
+	return set
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // same-origin (no Origin header)
+		}
+		return allowedWsOrigins[origin]
 	},
 }
 
@@ -38,7 +57,7 @@ func (mh *MetricHandler) WsHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Println("Error upgrading:", err)
+		slog.Error("websocket upgrade failed", "error", err)
 		return
 	}
 	defer conn.Close()

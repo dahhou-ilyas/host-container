@@ -40,8 +40,9 @@ jobs:
         run: go build -v ./...
 
       - name: Run tests
+        env:
+          JWT_SECRET_KEY: test-secret-key-at-least-32-chars-long!!
         run: go test -v -race -coverprofile=coverage.out ./...
-        continue-on-error: true
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -69,7 +70,6 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
-        continue-on-error: true
 
   security-scan:
     name: Security Vulnerability Scan
@@ -89,7 +89,6 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-        continue-on-error: true
 
   docker-build-push:
     name: Build & Push Docker Image

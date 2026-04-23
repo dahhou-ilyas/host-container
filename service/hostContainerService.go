@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -437,14 +438,50 @@ func (cm *ContainerManager) RemoveContainer(ctx context.Context, projectID strin
 	return nil
 }
 
-func (cm *ContainerManager) GetContainerInfo(ctx context.Context ,projectID string) (*ContainerInfo, error) {
-
-	info, err := cm.repo.GetContainerByID(ctx , cm.repo.GetDB() , projectID)
+func (cm *ContainerManager) GetContainerInfo(ctx context.Context, projectID string) (*ContainerInfo, error) {
+	info, err := cm.repo.GetContainerByID(ctx, cm.repo.GetDB(), projectID)
 	if err != nil {
 		return nil, fmt.Errorf("container not found for project %s", projectID)
 	}
-
 	return &info, nil
+}
+
+// WriteFileToContainer writes content to destPath inside the container using a tar stream,
+// avoiding shell command injection entirely.
+func (cm *ContainerManager) WriteFileToContainer(ctx context.Context, projectID, destPath, content string) error {
+	info, err := cm.repo.GetContainerByID(ctx, cm.repo.GetDB(), projectID)
+	if err != nil {
+		return fmt.Errorf("container not found for project %s", projectID)
+	}
+
+	fileName := filepath.Base(destPath)
+	dirPath := filepath.Dir(destPath)
+
+	// Ensure parent directory exists inside the container
+	if err := cm.execInContainer(ctx, info.ContainerID, []string{"mkdir", "-p", dirPath}); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
+	}
+
+	// Build a tar archive containing the single file
+	data := []byte(content)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{
+		Name: fileName,
+		Mode: 0644,
+		Size: int64(len(data)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("failed to write tar header: %w", err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("failed to write tar content: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	return cm.client.CopyToContainer(ctx, info.ContainerID, dirPath, &buf, container.CopyToContainerOptions{})
 }
 
 
