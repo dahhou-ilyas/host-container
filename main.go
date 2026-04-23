@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -26,7 +27,12 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
 func main() {
+	// Structured JSON logging for production
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
 
 	appAddr := os.Getenv("APP_ADDR")
 
@@ -62,12 +68,12 @@ func main() {
 
 	basePath := os.Getenv("PROJECTS_BASE_PATH")
 	if basePath == "" {
-		basePath = "/Users/ilyasdahhou/Downloads/dock_wrp_pr/docker-wrapper/projectExemple"
+		basePath = "/tmp/projects"
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://docker_user:docker_password@localhost:5432/docker_wrapper?sslmode=disable"
+		log.Fatal("DATABASE_URL environment variable must be set")
 	}
 
 	autoStopTimeoutStr := os.Getenv("CONTAINER_AUTO_STOP_TIMEOUT")
@@ -81,6 +87,10 @@ func main() {
 
 	if err := db_config.Init(dsn); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	if err := runMigrations(dsn); err != nil {
+		log.Fatalf("Failed to run database migrations: %v", err)
 	}
 
 	handler, err := service.NewHandler(basePath, db_config.Pool(), autoStopTimeout)
@@ -106,35 +116,52 @@ func main() {
 	// promhttp.Handler() expose les métriques enregistrées :contentReference[oaicite:2]{index=2}
 	adminMux.Handle("/metrics", promhttp.Handler())
 
-	// Health endpoints (k8s/load balancer)
+	// Health endpoints (k8s / load balancer)
 	adminMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		// Liveness: process is alive
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		w.Write([]byte(`{"status":"ok"}`))
 	})
 	adminMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		// Ici tu mets tes checks (DB, redis, dépendances…)
+		// Readiness: can we serve traffic? check DB connectivity
+		w.Header().Set("Content-Type", "application/json")
+		if err := db_config.Pool().Ping(r.Context()); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"unavailable","reason":"database unreachable"}`))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ready"))
+		w.Write([]byte(`{"status":"ready"}`))
 	})
 
-	// pprof (profiling). À sécuriser (réseau interne / auth) :contentReference[oaicite:3]{index=3}
-	// On enregistre pprof sur NOTRE adminMux (pas le DefaultServeMux)
-	adminMux.HandleFunc("/debug/pprof/", pprof.Index)
-	adminMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	adminMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	adminMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	adminMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// pprof only enabled when ENABLE_PPROF=true (never expose in production without network restriction)
+	if os.Getenv("ENABLE_PPROF") == "true" {
+		adminMux.HandleFunc("/debug/pprof/", pprof.Index)
+		adminMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		adminMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		adminMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		adminMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		log.Printf("pprof profiling enabled on %s/debug/pprof/", adminAddr)
+	}
 
 
 	//################################" Main App ############################################"
 	router := mux.NewRouter()
 
-	router.Handle("/ping", instrumentRoute("ping", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Global middleware stack (outermost first)
+	router.Use(middlware.Recovery)
+	router.Use(middlware.NewIPRateLimiter(10, 30).Middleware)
+	router.Use(middlware.RequestLogger)
+	router.Use(prometheusMiddleware(httpMetrics))
+
+	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("pong"))
-	}), httpMetrics))
+	})
 
 	router.HandleFunc("/auth/login", userHandler.Login)
 	router.HandleFunc("/auth/register", userHandler.Register)
+	router.HandleFunc("/auth/refresh", userHandler.RefreshToken)
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
@@ -172,7 +199,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    appAddr,
-		Handler: router,
+		Handler: middlware.CORSMiddleware(router),
 	}
 
 	adminSrv := &http.Server{
@@ -272,16 +299,27 @@ func newHTTPMetrics() *httpMetrics {
 	}
 }
 
-func instrumentRoute(routeName string, next http.Handler, m *httpMetrics) http.Handler {
-	// 1) Tracing auto (otelhttp) :contentReference[oaicite:5]{index=5}
-	h := otelhttp.NewHandler(next, routeName)
-
-	// 2) Prometheus middleware (counter/duration/in-flight) via promhttp :contentReference[oaicite:6]{index=6}
-	h = promhttp.InstrumentHandlerInFlight(m.inFlight, h)
-	h = promhttp.InstrumentHandlerCounter(m.reqTotal.MustCurryWith(prometheus.Labels{"handler": routeName}), h)
-	h = promhttp.InstrumentHandlerDuration(m.reqDuration.MustCurryWith(prometheus.Labels{"handler": routeName}), h)
-
-	return h
+// prometheusMiddleware instruments ALL routes automatically using Gorilla Mux route templates as labels.
+func prometheusMiddleware(m *httpMetrics) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			routeName := r.URL.Path
+			if route := mux.CurrentRoute(r); route != nil {
+				if tpl, err := route.GetPathTemplate(); err == nil {
+					routeName = tpl
+				}
+			}
+			h := otelhttp.NewHandler(next, routeName)
+			h = promhttp.InstrumentHandlerInFlight(m.inFlight, h)
+			h = promhttp.InstrumentHandlerCounter(
+				m.reqTotal.MustCurryWith(prometheus.Labels{"handler": routeName}), h,
+			)
+			h = promhttp.InstrumentHandlerDuration(
+				m.reqDuration.MustCurryWith(prometheus.Labels{"handler": routeName}), h,
+			)
+			h.ServeHTTP(w, r)
+		})
+	}
 }
 
 
