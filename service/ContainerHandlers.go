@@ -271,7 +271,7 @@ func (h *Handler) TreeFolder(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"tree", "-F", "/workspace"})
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"tree", "--charset", "ASCII", "-F", "/workspace"})
 
 	if err != nil {
 		utils.RespondError(w, err.Error(), http.StatusInternalServerError)

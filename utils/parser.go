@@ -107,7 +107,7 @@ func ParserTreeFolder(input string) *Node {
 }
 
 var fourSpacesRe = regexp.MustCompile(`    `)
-var barPlus3SpacesRe = regexp.MustCompile(`│   `)
+var barPlus3SpacesRe = regexp.MustCompile(`[│|]   `)
 
 func countFourSpaces(s string) int {
 	return len(fourSpacesRe.FindAllString(s, -1))
