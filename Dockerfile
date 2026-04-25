@@ -3,8 +3,7 @@ FROM golang:1.25-alpine AS builder
 LABEL org.opencontainers.image.source="https://github.com/dahhou-ilyas/host-container"
 
 ENV CGO_ENABLED=0 \
-    GOOS=linux \
-    GOARCH=amd64
+    GOOS=linux
 
 WORKDIR /build
 
@@ -24,7 +23,19 @@ LABEL org.opencontainers.image.title="docker-wrapper" \
 RUN addgroup -S -g 1001 appgroup && \
     adduser  -S -u 1001 -G appgroup appuser
 
-RUN apk add --no-cache su-exec curl
+# Install gosu (arch-aware) for proper supplementary group support
+RUN set -eux; \
+    apk add --no-cache curl wget; \
+    case "$(uname -m)" in \
+        x86_64)  ARCH=amd64 ;; \
+        aarch64) ARCH=arm64 ;; \
+        armv7l)  ARCH=armhf ;; \
+        *) echo "unsupported arch: $(uname -m)" && exit 1 ;; \
+    esac; \
+    wget -q -O /usr/local/bin/gosu \
+        "https://github.com/tianon/gosu/releases/download/1.17/gosu-${ARCH}"; \
+    chmod +x /usr/local/bin/gosu; \
+    gosu nobody true
 
 COPY --from=builder /app /bin/app
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -9,6 +9,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -303,6 +304,11 @@ func newHTTPMetrics() *httpMetrics {
 func prometheusMiddleware(m *httpMetrics) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// WebSocket upgrades require http.Hijacker — skip instrumentation wrappers
+			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				next.ServeHTTP(w, r)
+				return
+			}
 			routeName := r.URL.Path
 			if route := mux.CurrentRoute(r); route != nil {
 				if tpl, err := route.GetPathTemplate(); err == nil {

@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS audit_log (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id     BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     action      TEXT        NOT NULL,
     resource    TEXT        NOT NULL,
     resource_id TEXT,

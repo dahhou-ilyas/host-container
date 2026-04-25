@@ -1,4 +1,18 @@
 services:
+  docker-proxy:
+    container_name: docker-proxy
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      - CONTAINERS=1
+      - IMAGES=1
+      - EXEC=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - go-network
+    restart: unless-stopped
+
   api:
     container_name: go-api
     build:
@@ -9,7 +23,6 @@ services:
       - "8080:8080"
       - "2112:2112"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/projects:/tmp/projects
     environment:
       - DATABASE_URL=${DATABASE_URL}
@@ -19,6 +32,7 @@ services:
       - APP_ADDR=:8080
       - ADMIN_ADDR=:2112
       - ENABLE_PPROF=${ENABLE_PPROF:-false}
+      - DOCKER_HOST=tcp://docker-proxy:2375
     networks:
       - go-network
     healthcheck:
@@ -31,13 +45,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      docker-proxy:
+        condition: service_started
 
   postgres:
     container_name: go-postgres
     image: postgres:16-alpine
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-docker_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-docker_user}
       - POSTGRES_DB=${POSTGRES_DB:-docker_wrapper}
     volumes:
       - postgres-data:/var/lib/postgresql/data
