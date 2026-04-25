@@ -2,6 +2,8 @@
 
 A secure, production-ready REST API for managing Docker containers through a multi-user web interface. Users can spin up pre-defined container environments, interact with them via a browser-based terminal, stream logs in real time, and edit files directly — all without direct access to the Docker daemon.
 
+> **Frontend repository:** [dahhou-ilyas/host-container-frontend](https://github.com/dahhou-ilyas/host-container-frontend) — React SPA that consumes this API.
+
 ---
 
 ## Architecture
@@ -284,6 +286,15 @@ Two datasources are pre-provisioned:
 The API exports OpenTelemetry traces to `http://tempo:4318` (OTLP/HTTP). Every HTTP handler is automatically instrumented via `otelhttp`. Traces are retained for 24 hours.
 
 Set `OTEL_EXPORTER_OTLP_ENDPOINT=` (empty) to disable tracing entirely with zero overhead.
+
+---
+
+## Related Repositories
+
+| Repository | Description |
+|---|---|
+| [host-container](https://github.com/dahhou-ilyas/host-container) | This backend API |
+| [host-container-frontend](https://github.com/dahhou-ilyas/host-container-frontend) | React SPA frontend |
 
 ---
 
