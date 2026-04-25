@@ -203,6 +203,10 @@ func main() {
 	router.HandleFunc("/ws/terminal/{project_id}", middlware.AuthMiddleware(terminalHandler.WsHandler))
 	router.HandleFunc("/ws/logs/{project_id}", middlware.AuthMiddleware(logsHandler.WsHandler))
 
+	templateHandler := service.NewTemplateHandler(db_config.Pool())
+	router.HandleFunc("/templates", templateHandler.ListTemplates)
+	router.HandleFunc("/templates/{id}", templateHandler.GetTemplate)
+
 	server := &http.Server{
 		Addr:    appAddr,
 		Handler: middlware.CORSMiddleware(router),
