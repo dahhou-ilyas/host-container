@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dahhou-ilyas/host-container/repository"
 	"github.com/dahhou-ilyas/host-container/utils"
 
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ type ExecRequest struct {
 
 type Handler struct {
 	manager *ContainerManager
+	pool    *pgxpool.Pool
 }
 
 func NewHandler(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Duration) (*Handler, error) {
@@ -42,7 +44,7 @@ func NewHandler(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Durati
 	if err != nil {
 		return nil, err
 	}
-	return &Handler{manager: manager}, nil
+	return &Handler{manager: manager, pool: pool}, nil
 }
 
 func (h *Handler) Manager() *ContainerManager {
@@ -85,6 +87,21 @@ func (h *Handler) CreateContainer(w http.ResponseWriter, r *http.Request) {
 
 	if req.Image == "" {
 		req.Image = "alpine:latest"
+	}
+
+	// Validate image against the predefined templates whitelist
+	if allowed, err := repository.GetAllowedImages(r.Context(), h.pool); err == nil && len(allowed) > 0 {
+		found := false
+		for _, img := range allowed {
+			if img == req.Image {
+				found = true
+				break
+			}
+		}
+		if !found {
+			utils.RespondError(w, "image not allowed — choose a predefined template", http.StatusBadRequest)
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
