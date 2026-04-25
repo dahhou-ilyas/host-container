@@ -252,8 +252,11 @@ func main() {
 // ---------- Observability helpers ----------
 
 func initOpenTelemetry(ctx context.Context, serviceName string) (func(context.Context) error, error) {
-	// Export OTLP/HTTP (configurable via env vars)
-	// OTEL_EXPORTER_OTLP_ENDPOINT est supporté (et /v1/traces est append en OTLP/HTTP) :contentReference[oaicite:4]{index=4}
+	// If no collector is configured, skip OTEL entirely (no-op)
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
+		return func(context.Context) error { return nil }, nil
+	}
+
 	exp, err := otlptracehttp.New(ctx)
 	if err != nil {
 		return nil, err
