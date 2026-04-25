@@ -271,20 +271,14 @@ func (h *Handler) TreeFolder(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"tree", "--charset", "ASCII", "-F", "/workspace"})
+	stdout, _, err := h.manager.ExecCommand(ctx, projectID, []string{"sh", "-c", "find /workspace -maxdepth 10 2>/dev/null | sort"})
 
 	if err != nil {
 		utils.RespondError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if stderr != "" {
-    	log.Printf("Commande a produit une erreur: %s", stderr)
-		utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"output": stderr}}, http.StatusOK)
-		return
-	}
-
-	node := utils.ParserTreeFolder(stdout);
+	node := utils.ParserTreeFolder(stdout)
 
 
 	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: node}, http.StatusOK)

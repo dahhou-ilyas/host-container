@@ -1,8 +1,7 @@
 package utils
 
-
 import (
-	"regexp"
+	"path/filepath"
 	"strings"
 )
 
@@ -12,107 +11,56 @@ type Node struct {
 	Children []*Node `json:"children,omitempty"`
 }
 
+// ParserTreeFolder parses sorted `find /workspace` output into a Node tree.
+// Each line is an absolute path; a path is a directory if any other path starts with it + "/".
 func ParserTreeFolder(input string) *Node {
-	if strings.TrimSpace(input) == "" {
-		return &Node{Name: ".", Type: "dir", Children: []*Node{}}
+	root := &Node{Name: ".", Type: "dir", Children: []*Node{}}
+
+	lines := strings.Split(strings.TrimSpace(input), "\n")
+	var paths []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "/workspace" {
+			continue
+		}
+		paths = append(paths, line)
+	}
+	if len(paths) == 0 {
+		return root
 	}
 
-	stack := []*Node{}
-	lines := strings.Split(input, "\n")
-	directorRe := regexp.MustCompile(`^\d+ director`)
-
-	for index, line := range lines {
-		if strings.TrimSpace(line) == "" || directorRe.MatchString(line) {
-			continue
-		}
-
-		if line == "." || index == 0 {
-			root := &Node{Name: ".", Type: "dir", Children: []*Node{}}
-			stack = append(stack, root)
-			continue
-		}
-
-		var connecteurIndex int
-		hasConnector := false
-		if idx := strings.Index(line, "├──"); idx != -1 {
-			connecteurIndex = idx
-			hasConnector = true
-		} else if idx := strings.Index(line, "└──"); idx != -1 {
-			connecteurIndex = idx
-			hasConnector = true
-		}else if idx := strings.Index(line, "|--"); idx != -1 {
-			connecteurIndex = idx
-			hasConnector = true
-		}else if idx := strings.Index(line, "`--"); idx != -1 {
-			connecteurIndex = idx
-			hasConnector = true
-		}
-		
-
-		if !hasConnector || len(stack) == 0 {
-			continue
-		}
-
-		depthString := line[:connecteurIndex]
-		depth := countBarPlus3Spaces(depthString)
-		if depth != 0 {
-			// "│   " fait 4 bytes en UTF-8 pour │ (3) + 3 espaces = 6 bytes
-			// Mais on travaille en runes pour être safe
-			runes := []rune(depthString)
-			if len(runes) > 4 {
-				depthString = string(runes[4:])
-			} else {
-				depthString = ""
+	// First pass: identify directories (any path that has children)
+	dirSet := make(map[string]bool)
+	for _, p1 := range paths {
+		prefix := p1 + "/"
+		for _, p2 := range paths {
+			if strings.HasPrefix(p2, prefix) {
+				dirSet[p1] = true
+				break
 			}
 		}
-		depth += countFourSpaces(depthString)
+	}
 
-		// +4 pour sauter "├── " (le connecteur + l'espace)
-		runesLine := []rune(line)
-		// "├──" = 3 runes, + 1 espace = index +4 en runes
-		connecteurRuneIndex := len([]rune(line[:connecteurIndex]))
-		nodeString := string(runesLine[connecteurRuneIndex+4:])
+	// Second pass: build tree (paths are sorted, so parents always come before children)
+	nodes := map[string]*Node{"/workspace": root}
+	for _, p := range paths {
+		name := filepath.Base(p)
+		isDir := dirSet[p]
 
-		isFolder := strings.Contains(nodeString, "/")
-		nameNode := nodeString
-		if isFolder {
-			nameNode = nodeString[:len(nodeString)-1]
-		}
-
-		node := &Node{
-			Name: nameNode,
-			Type: "file",
-		}
-		if isFolder {
+		node := &Node{Name: name, Type: "file"}
+		if isDir {
 			node.Type = "dir"
 			node.Children = []*Node{}
 		}
 
-		for len(stack) > depth+1 {
-			stack = stack[:len(stack)-1]
+		parent := filepath.Dir(p)
+		parentNode, ok := nodes[parent]
+		if !ok {
+			continue
 		}
-
-		parent := stack[len(stack)-1]
-		parent.Children = append(parent.Children, node)
-
-		if isFolder {
-			stack = append(stack, node)
-		}
+		parentNode.Children = append(parentNode.Children, node)
+		nodes[p] = node
 	}
 
-	if len(stack) == 0 {
-		return &Node{Name: ".", Type: "dir", Children: []*Node{}}
-	}
-	return stack[0]
-}
-
-var fourSpacesRe = regexp.MustCompile(`    `)
-var barPlus3SpacesRe = regexp.MustCompile(`[│|]   `)
-
-func countFourSpaces(s string) int {
-	return len(fourSpacesRe.FindAllString(s, -1))
-}
-
-func countBarPlus3Spaces(s string) int {
-	return len(barPlus3SpacesRe.FindAllString(s, -1))
+	return root
 }
