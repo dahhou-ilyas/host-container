@@ -198,6 +198,11 @@ func main() {
 	}
 	router.HandleFunc("/ws", middlware.AuthMiddleware(metricHandler.WsHandler))
 
+	terminalHandler := websocket.NewTerminalHandler(handler.Manager())
+	logsHandler := websocket.NewLogsHandler(handler.Manager())
+	router.HandleFunc("/ws/terminal/{project_id}", middlware.AuthMiddleware(terminalHandler.WsHandler))
+	router.HandleFunc("/ws/logs/{project_id}", middlware.AuthMiddleware(logsHandler.WsHandler))
+
 	server := &http.Server{
 		Addr:    appAddr,
 		Handler: middlware.CORSMiddleware(router),

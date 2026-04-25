@@ -328,7 +328,62 @@ func (cm *ContainerManager) ExecCommand(ctx context.Context, projectID string, c
     }
 
     return stdout.String(), stderr.String(), nil
+}
 
+// ExecTerminal opens an interactive TTY exec session and returns the execID,
+// the underlying net.Conn (for stdin writes), and the buffered reader (for stdout/stderr).
+func (cm *ContainerManager) ExecTerminal(ctx context.Context, projectID string) (execID string, conn io.ReadWriteCloser, reader io.Reader, err error) {
+	info, repoErr := cm.repo.GetContainerByID(ctx, cm.repo.GetDB(), projectID)
+	if repoErr != nil {
+		return "", nil, nil, fmt.Errorf("container not found for project %s", projectID)
+	}
+
+	execConfig := container.ExecOptions{
+		Cmd:          []string{"/bin/sh"},
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          true,
+	}
+
+	exec, err := cm.client.ContainerExecCreate(ctx, info.ContainerID, execConfig)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed to create exec: %w", err)
+	}
+
+	resp, err := cm.client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{Tty: true})
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed to attach exec: %w", err)
+	}
+
+	return exec.ID, resp.Conn, resp.Reader, nil
+}
+
+// ResizeTerminal sends a resize event to the running exec TTY.
+func (cm *ContainerManager) ResizeTerminal(ctx context.Context, execID string, cols, rows uint) error {
+	return cm.client.ContainerExecResize(ctx, execID, container.ResizeOptions{
+		Width:  cols,
+		Height: rows,
+	})
+}
+
+// StreamLogs streams container logs (stdout+stderr) as a multiplexed Docker stream.
+func (cm *ContainerManager) StreamLogs(ctx context.Context, projectID string) (io.ReadCloser, error) {
+	info, err := cm.repo.GetContainerByID(ctx, cm.repo.GetDB(), projectID)
+	if err != nil {
+		return nil, fmt.Errorf("container not found for project %s", projectID)
+	}
+
+	reader, err := cm.client.ContainerLogs(ctx, info.ContainerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container logs: %w", err)
+	}
+
+	return reader, nil
 }
 
 func (cm *ContainerManager) StopContainer(ctx context.Context, projectID string) error {
