@@ -151,45 +151,49 @@ func (u *UserRepo) CreateUser(ctx context.Context, db DB, user User) (string, er
 
 func (u *UserRepo) GetUserByID(ctx context.Context, db DB, id string) (User, error) {
 	var user User
+	var verifiedAt *time.Time
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email
+		SELECT id::text, name, email, email_verified_at
 		FROM users
 		WHERE id = $1::bigint
-	`, id).Scan(&user.Id, &user.Name, &user.Email)
+	`, id).Scan(&user.Id, &user.Name, &user.Email, &verifiedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
 	}
+	user.EmailVerified = verifiedAt != nil
 	return user, err
 }
 
 func (u *UserRepo) GetUserByEmail(ctx context.Context, db DB, email string) (User, error) {
 	var user User
-
+	var verifiedAt *time.Time
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email
+		SELECT id::text, name, email, email_verified_at
 		FROM users
 		WHERE email = $1
-	`, email).Scan(&user.Id, &user.Name, &user.Email)
+	`, email).Scan(&user.Id, &user.Name, &user.Email, &verifiedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
 	}
+	user.EmailVerified = verifiedAt != nil
 	return user, err
 }
 
 func (u *UserRepo) GetUserByEmailWithPassword(ctx context.Context, db DB, email string) (User, error) {
 	var user User
-
+	var verifiedAt *time.Time
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email, password_hash
+		SELECT id::text, name, email, password_hash, email_verified_at
 		FROM users
 		WHERE email = $1
-	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password)
+	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password, &verifiedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
 	}
+	user.EmailVerified = verifiedAt != nil
 	return user, err
 }
 
@@ -200,8 +204,8 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 
 	rows, err := db.Query(ctx, `
 		SELECT
-			u.id::text, u.name, u.email,
-			c.container_id, c.id::text, c.project_name, c.folder_path, c.port::text, c.status, c.image_name, c.created_at
+			u.id::text, u.name, u.email, u.email_verified_at,
+			c.container_id, c.id::text, c.project_name, c.folder_path, c.port::text, c.status, c.image_name, c.created_at, c.started_at
 		FROM users u
 		LEFT JOIN containers c ON c.user_id = u.id
 		WHERE u.id = $1::bigint
@@ -218,13 +222,14 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 		foundUser = true
 
 		var uid, name, email string
+		var verifiedAt *time.Time
 
 		var containerID, projectID, projectName, folderPath, port, status, imageName *string
-		var createdAt *time.Time
+		var createdAt, startedAt *time.Time
 
 		if err := rows.Scan(
-			&uid, &name, &email,
-			&containerID, &projectID, &projectName, &folderPath, &port, &status, &imageName, &createdAt,
+			&uid, &name, &email, &verifiedAt,
+			&containerID, &projectID, &projectName, &folderPath, &port, &status, &imageName, &createdAt, &startedAt,
 		); err != nil {
 			return User{}, nil, err
 		}
@@ -233,6 +238,7 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 			user.Id = uid
 			user.Name = name
 			user.Email = email
+			user.EmailVerified = verifiedAt != nil
 		}
 
 		// (LEFT JOIN => colonnes NULL), on skip
@@ -262,6 +268,9 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 		}
 		if imageName != nil {
 			c.ImageName = *imageName
+		}
+		if startedAt != nil {
+			c.StartedAt = startedAt
 		}
 
 		containers = append(containers, c)

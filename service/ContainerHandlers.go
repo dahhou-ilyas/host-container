@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -392,6 +395,96 @@ func (h *Handler) WriteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: "file saved"}, http.StatusOK)
+}
+
+// POST /containers/file/upload?project_id=<id>
+// multipart/form-data: field "path" = target folder inside container, field "file" = the file
+func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		utils.RespondError(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+	// 10 MB limit
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		utils.RespondError(w, "file too large (max 10 MB)", http.StatusRequestEntityTooLarge)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		utils.RespondError(w, "missing file field", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	targetFolder := r.FormValue("path")
+	if targetFolder == "" {
+		targetFolder = "/workspace"
+	}
+	cleanFolder := filepath.Clean(targetFolder)
+	if !strings.HasPrefix(cleanFolder, "/workspace") {
+		utils.RespondError(w, "access denied: path must be within /workspace", http.StatusForbidden)
+		return
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		utils.RespondError(w, "failed to read uploaded file", http.StatusInternalServerError)
+		return
+	}
+
+	destPath := filepath.Join(cleanFolder, filepath.Base(header.Filename))
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := h.manager.WriteFileToContainer(ctx, projectID, destPath, string(data)); err != nil {
+		utils.RespondError(w, "failed to write file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: map[string]string{"path": destPath}}, http.StatusOK)
+}
+
+// GET /containers/file/download?project_id=<id>&path=<path>
+func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	projectID := r.URL.Query().Get("project_id")
+	filePath := r.URL.Query().Get("path")
+	if projectID == "" || filePath == "" {
+		utils.RespondError(w, "project_id and path are required", http.StatusBadRequest)
+		return
+	}
+	cleanPath := filepath.Clean(filePath)
+	if !strings.HasPrefix(cleanPath, "/workspace") {
+		utils.RespondError(w, "access denied: path must be within /workspace", http.StatusForbidden)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	stdout, stderr, err := h.manager.ExecCommand(ctx, projectID, []string{"cat", cleanPath})
+	if err != nil || stderr != "" {
+		utils.RespondError(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	filename := filepath.Base(cleanPath)
+	mimeType := mime.TypeByExtension(filepath.Ext(filename))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Type", mimeType)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(stdout))
 }
 
 func (h *Handler) Close() error {

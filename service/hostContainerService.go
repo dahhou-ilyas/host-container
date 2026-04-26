@@ -37,6 +37,7 @@ type ContainerInfo struct {
 	Status      string     `json:"status"`
 	UserId      string     `json:"userId"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
+	AutoStopAt  *time.Time `json:"auto_stop_at,omitempty"`
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
 }
 
@@ -498,6 +499,10 @@ func (cm *ContainerManager) GetContainerInfo(ctx context.Context, projectID stri
 	if err != nil {
 		return nil, fmt.Errorf("container not found for project %s", projectID)
 	}
+	if info.Status == "running" && info.StartedAt != nil {
+		t := info.StartedAt.Add(cm.autoStopTimeout)
+		info.AutoStopAt = &t
+	}
 	return &info, nil
 }
 
@@ -647,6 +652,14 @@ func (cm *ContainerManager) checkAndStopExpiredContainers() {
 			log.Printf("Auto-stop watcher: failed to stop container %s: %v", c.ProjectID, err)
 		} else {
 			log.Printf("Auto-stop watcher: successfully stopped container %s", c.ProjectID)
+			// Push real-time notification to the container owner
+			GlobalBus.Publish(c.UserId, Notification{
+				ID:    c.ProjectID,
+				Type:  "container_auto_stopped",
+				Title: "Container auto-stopped",
+				Body:  fmt.Sprintf("Container \"%s\" was automatically stopped after the idle timeout.", c.ProjectName),
+				CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			})
 		}
 	}
 }
