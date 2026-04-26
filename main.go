@@ -163,6 +163,10 @@ func main() {
 	router.HandleFunc("/auth/login", userHandler.Login)
 	router.HandleFunc("/auth/register", userHandler.Register)
 	router.HandleFunc("/auth/refresh", userHandler.RefreshToken)
+	router.HandleFunc("/auth/verify-email", userHandler.VerifyEmail)
+	router.HandleFunc("/auth/resend-verification", userHandler.ResendVerification)
+	router.HandleFunc("/auth/forgot-password", userHandler.ForgotPassword)
+	router.HandleFunc("/auth/reset-password", userHandler.ResetPassword)
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
@@ -189,8 +193,10 @@ func main() {
 	router.HandleFunc("/containers/exec", middlware.AuthMiddleware(handler.ExecCommand))
 
 	router.HandleFunc("/containers/showTreeFolder",middlware.AuthMiddleware(handler.TreeFolder))
-	router.HandleFunc("/containers/file/read", middlware.AuthMiddleware(handler.ReadFile))
-	router.HandleFunc("/containers/file/write", middlware.AuthMiddleware(handler.WriteFile))
+	router.HandleFunc("/containers/file/read",     middlware.AuthMiddleware(handler.ReadFile))
+	router.HandleFunc("/containers/file/write",    middlware.AuthMiddleware(handler.WriteFile))
+	router.HandleFunc("/containers/file/upload",   middlware.AuthMiddleware(handler.UploadFile))
+	router.HandleFunc("/containers/file/download", middlware.AuthMiddleware(handler.DownloadFile))
 
 	metricHandler, err := websocket.NewMetricHandler(handler.Manager())
 	if err != nil {
@@ -206,6 +212,11 @@ func main() {
 	templateHandler := service.NewTemplateHandler(db_config.Pool())
 	router.HandleFunc("/templates", templateHandler.ListTemplates)
 	router.HandleFunc("/templates/{id}", templateHandler.GetTemplate)
+
+	notifHandler := service.NewNotificationHandler(db_config.Pool(), service.GlobalBus)
+	router.HandleFunc("/notifications/stream",    middlware.AuthMiddleware(notifHandler.Stream))
+	router.HandleFunc("/notifications",           middlware.AuthMiddleware(notifHandler.List))
+	router.HandleFunc("/notifications/read-all",  middlware.AuthMiddleware(notifHandler.MarkAllRead))
 
 	server := &http.Server{
 		Addr:    appAddr,

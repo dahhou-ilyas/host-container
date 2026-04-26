@@ -2,16 +2,24 @@ package service
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type User struct {
-	Id         string           `json:"id"`
-	Name       string           `json:"name,omitempty"`
-	Email      string           `json:"email,omitempty"`
-	Password   string           `json:"password,omitempty"`
-	Containers *[]ContainerInfo `json:"project,omitempty"`
+	Id            string           `json:"id"`
+	Name          string           `json:"name,omitempty"`
+	Email         string           `json:"email,omitempty"`
+	Password      string           `json:"password,omitempty"`
+	EmailVerified bool             `json:"email_verified"`
+	Containers    *[]ContainerInfo `json:"project,omitempty"`
+}
+
+// IDInt converts the string ID to int64 for use in repository calls.
+func (u *User) IDInt() int64 {
+	id, _ := strconv.ParseInt(u.Id, 10, 64)
+	return id
 }
 
 type UserService struct {
