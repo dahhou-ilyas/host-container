@@ -268,6 +268,12 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		assignedPort = bindings[0].HostPort
 	}
 
+	// Store as "hostPort:containerPort" so the frontend regex (\d+):(\d+) can parse both values
+	portEntry := ""
+	if assignedPort != "" {
+		portEntry = assignedPort + ":" + containerPort
+	}
+
 	now := time.Now()
 	info := &ContainerInfo{
 		ContainerID: resp.ID,
@@ -275,7 +281,7 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		ProjectName: project.Name,
 		ImageName:   imageName,
 		FolderPath:  folderPath,
-		Port:        assignedPort,
+		Port:        portEntry,
 		Status:      "running",
 		UserId:      project.UserId,
 		StartedAt:   &now,
