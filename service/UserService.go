@@ -13,6 +13,8 @@ type User struct {
 	Email         string           `json:"email,omitempty"`
 	Password      string           `json:"password,omitempty"`
 	EmailVerified bool             `json:"email_verified"`
+	Role          string           `json:"role,omitempty"`
+	PlanID        string           `json:"plan_id,omitempty"`
 	Containers    *[]ContainerInfo `json:"project,omitempty"`
 }
 

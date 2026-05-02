@@ -153,10 +153,10 @@ func (u *UserRepo) GetUserByID(ctx context.Context, db DB, id string) (User, err
 	var user User
 	var verifiedAt *time.Time
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email, email_verified_at
+		SELECT id::text, name, email, email_verified_at, role, plan_id
 		FROM users
 		WHERE id = $1::bigint
-	`, id).Scan(&user.Id, &user.Name, &user.Email, &verifiedAt)
+	`, id).Scan(&user.Id, &user.Name, &user.Email, &verifiedAt, &user.Role, &user.PlanID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
@@ -169,10 +169,10 @@ func (u *UserRepo) GetUserByEmail(ctx context.Context, db DB, email string) (Use
 	var user User
 	var verifiedAt *time.Time
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email, email_verified_at
+		SELECT id::text, name, email, email_verified_at, role, plan_id
 		FROM users
 		WHERE email = $1
-	`, email).Scan(&user.Id, &user.Name, &user.Email, &verifiedAt)
+	`, email).Scan(&user.Id, &user.Name, &user.Email, &verifiedAt, &user.Role, &user.PlanID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
@@ -185,10 +185,10 @@ func (u *UserRepo) GetUserByEmailWithPassword(ctx context.Context, db DB, email 
 	var user User
 	var verifiedAt *time.Time
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, email, password_hash, email_verified_at
+		SELECT id::text, name, email, password_hash, email_verified_at, role, plan_id
 		FROM users
 		WHERE email = $1
-	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password, &verifiedAt)
+	`, email).Scan(&user.Id, &user.Name, &user.Email, &user.Password, &verifiedAt, &user.Role, &user.PlanID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, UserNotFound
@@ -204,7 +204,7 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 
 	rows, err := db.Query(ctx, `
 		SELECT
-			u.id::text, u.name, u.email, u.email_verified_at,
+			u.id::text, u.name, u.email, u.email_verified_at, u.role, u.plan_id,
 			c.container_id, c.id::text, c.project_name, c.folder_path, c.port::text, c.status, c.image_name, c.created_at, c.started_at
 		FROM users u
 		LEFT JOIN containers c ON c.user_id = u.id
@@ -221,14 +221,14 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 	for rows.Next() {
 		foundUser = true
 
-		var uid, name, email string
+		var uid, name, email, role, planID string
 		var verifiedAt *time.Time
 
 		var containerID, projectID, projectName, folderPath, port, status, imageName *string
 		var createdAt, startedAt *time.Time
 
 		if err := rows.Scan(
-			&uid, &name, &email, &verifiedAt,
+			&uid, &name, &email, &verifiedAt, &role, &planID,
 			&containerID, &projectID, &projectName, &folderPath, &port, &status, &imageName, &createdAt, &startedAt,
 		); err != nil {
 			return User{}, nil, err
@@ -239,6 +239,8 @@ func (u *UserRepo) GetContainersForUserByID(ctx context.Context, db DB, userId s
 			user.Name = name
 			user.Email = email
 			user.EmailVerified = verifiedAt != nil
+			user.Role = role
+			user.PlanID = planID
 		}
 
 		// (LEFT JOIN => colonnes NULL), on skip

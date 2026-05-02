@@ -99,9 +99,12 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		return nil, fmt.Errorf("failed to get the user and container: %w", err)
 	}
 
-	maxContainers := getMaxContainersPerUser()
-	if len(containers) >= maxContainers {
-		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
+	plan, planErr := GetPlanForUser(ctx, tx, project.UserId)
+	if planErr != nil {
+		return nil, fmt.Errorf("failed to fetch plan: %w", planErr)
+	}
+	if len(containers) >= plan.MaxContainers {
+		return nil, fmt.Errorf("plan limit reached: your %s plan allows %d containers", plan.Name, plan.MaxContainers)
 	}
 
 	if err = cm.pullImageIfNeeded(ctx, imageName); err != nil {
@@ -134,8 +137,8 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 			},
 		},
 		Resources: container.Resources{
-			Memory:   512 * 1024 * 1024,
-			NanoCPUs: 1000000000,
+			Memory:   int64(plan.MaxMemoryMB) * 1024 * 1024,
+			NanoCPUs: plan.MaxCPUNanoCores,
 		},
 		AutoRemove: false,
 	}
@@ -198,12 +201,13 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		return nil, fmt.Errorf("failed to get the user and container: %w", err)
 	}
 
-	maxContainers := getMaxContainersPerUser()
-	if len(containers) >= maxContainers {
-		return nil, fmt.Errorf("container limit reached: you have %d containers (max: %d)", len(containers), maxContainers)
+	plan, planErr := GetPlanForUser(ctx, tx, project.UserId)
+	if planErr != nil {
+		return nil, fmt.Errorf("failed to fetch plan: %w", planErr)
 	}
-
-	
+	if len(containers) >= plan.MaxContainers {
+		return nil, fmt.Errorf("plan limit reached: your %s plan allows %d containers", plan.Name, plan.MaxContainers)
+	}
 
 	if err := cm.pullImageIfNeeded(ctx, imageName); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
@@ -236,8 +240,8 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 			},
 		},
 		Resources: container.Resources{
-			Memory:   512 * 1024 * 1024,
-			NanoCPUs: 1000000000,
+			Memory:   int64(plan.MaxMemoryMB) * 1024 * 1024,
+			NanoCPUs: plan.MaxCPUNanoCores,
 		},
 	}
 
