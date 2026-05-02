@@ -16,6 +16,7 @@ import (
 	"github.com/dahhou-ilyas/host-container/db_config"
 	"github.com/dahhou-ilyas/host-container/middlware"
 	"github.com/dahhou-ilyas/host-container/service"
+	"github.com/dahhou-ilyas/host-container/utils"
 	"github.com/dahhou-ilyas/host-container/websocket"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
@@ -100,6 +101,10 @@ func main() {
 	}
 
 	userHandler := service.NewUserHandler(db_config.Pool())
+
+	auth := middlware.NewAuth(db_config.Pool())
+	adminHandler := service.NewAdminHandler(db_config.Pool())
+	apiKeyHandler := service.NewApiKeyHandler(db_config.Pool())
 
 	handler.StartAutoStopWatcher()
 
@@ -217,6 +222,41 @@ func main() {
 	router.HandleFunc("/notifications/stream",    middlware.AuthMiddleware(notifHandler.Stream))
 	router.HandleFunc("/notifications",           middlware.AuthMiddleware(notifHandler.List))
 	router.HandleFunc("/notifications/read-all",  middlware.AuthMiddleware(notifHandler.MarkAllRead))
+
+	// API Keys
+	router.HandleFunc("/api-keys",      auth.Middleware(apiKeyHandler.Dispatch))
+	router.HandleFunc("/api-keys/{id}", auth.Middleware(apiKeyHandler.Delete))
+
+	// Admin (double-protected: auth + admin role)
+	router.HandleFunc("/admin/stats",           auth.Middleware(auth.AdminOnly(adminHandler.Stats)))
+	router.HandleFunc("/admin/users",           auth.Middleware(auth.AdminOnly(adminHandler.ListUsers)))
+	router.HandleFunc("/admin/users/{id}",      auth.Middleware(auth.AdminOnly(adminHandler.DeleteUser)))
+	router.HandleFunc("/admin/users/{id}/plan", auth.Middleware(auth.AdminOnly(adminHandler.UpdateUserPlan)))
+
+	// Plans (public — for billing page)
+	router.HandleFunc("/plans", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db_config.Pool().Query(r.Context(),
+			`SELECT id, name, max_containers, auto_stop_minutes, price_usd_cents FROM plans ORDER BY price_usd_cents`)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		type PlanItem struct {
+			ID              string `json:"id"`
+			Name            string `json:"name"`
+			MaxContainers   int    `json:"max_containers"`
+			AutoStopMinutes int    `json:"auto_stop_minutes"`
+			PriceUSDCents   int    `json:"price_usd_cents"`
+		}
+		plans := make([]PlanItem, 0)
+		for rows.Next() {
+			var p PlanItem
+			rows.Scan(&p.ID, &p.Name, &p.MaxContainers, &p.AutoStopMinutes, &p.PriceUSDCents)
+			plans = append(plans, p)
+		}
+		utils.RespondJSON(w, utils.APIResponse{Success: true, Data: plans}, http.StatusOK)
+	})
 
 	server := &http.Server{
 		Addr:    appAddr,
