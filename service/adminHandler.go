@@ -58,19 +58,25 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
-	search := "%" + strings.ToLower(r.URL.Query().Get("search")) + "%"
+	search := strings.ToLower(r.URL.Query().Get("search"))
+
+	if search == "" {
+		search = "%"
+	} else {
+		search = "%" + search + "%"
+	}
+
 	offset := (page - 1) * 20
 
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT u.id::text, u.name, u.email, u.role, u.plan_id,
-		       COUNT(c.id)::int AS container_count,
-		       u.created_at::text
+       	COUNT(c.id)::int AS container_count
 		FROM users u
 		LEFT JOIN containers c ON c.user_id = u.id
 		WHERE LOWER(u.email) LIKE $1 OR LOWER(u.name) LIKE $1
-		GROUP BY u.id
+		GROUP BY u.id, u.name, u.email, u.role, u.plan_id
 		ORDER BY u.id DESC
-		LIMIT 20 OFFSET $2
+		LIMIT 20 OFFSET $2;
 	`, search, offset)
 	if err != nil {
 		utils.RespondError(w, "internal error", http.StatusInternalServerError)
@@ -81,7 +87,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users := make([]AdminUser, 0)
 	for rows.Next() {
 		var u AdminUser
-		rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.PlanID, &u.ContainerCount, &u.CreatedAt)
+		rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.PlanID, &u.ContainerCount)
 		users = append(users, u)
 	}
 	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: users}, http.StatusOK)
