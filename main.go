@@ -227,6 +227,14 @@ func main() {
 	router.HandleFunc("/api-keys",      auth.Middleware(apiKeyHandler.Dispatch))
 	router.HandleFunc("/api-keys/{id}", auth.Middleware(apiKeyHandler.Delete))
 
+	// Networks
+	networkManager := service.NewNetworkManager(handler.Manager(), db_config.Pool())
+	networkHandler := service.NewNetworkHandler(networkManager)
+	router.HandleFunc("/networks",                              auth.Middleware(networkHandler.Dispatch))
+	router.HandleFunc("/networks/{id}",                        auth.Middleware(networkHandler.Delete))
+	router.HandleFunc("/networks/{id}/connect",                auth.Middleware(networkHandler.Connect))
+	router.HandleFunc("/networks/{id}/containers/{projectId}", auth.Middleware(networkHandler.Disconnect))
+
 	// Admin (double-protected: auth + admin role)
 	router.HandleFunc("/admin/stats",           auth.Middleware(auth.AdminOnly(adminHandler.Stats)))
 	router.HandleFunc("/admin/users",           auth.Middleware(auth.AdminOnly(adminHandler.ListUsers)))
