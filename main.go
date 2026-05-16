@@ -227,6 +227,12 @@ func main() {
 	router.HandleFunc("/api-keys",      auth.Middleware(apiKeyHandler.Dispatch))
 	router.HandleFunc("/api-keys/{id}", auth.Middleware(apiKeyHandler.Delete))
 
+	// Health monitoring & auto-recovery
+	recoveryService := service.NewRecoveryService(db_config.Pool(), handler.Manager(), service.GlobalBus)
+	handler.SetRecovery(recoveryService)
+	eventsService := service.NewContainerEventsService(handler.Manager().DockerClient(), recoveryService)
+	eventsService.Start(ctx)
+
 	// Networks
 	networkManager := service.NewNetworkManager(handler.Manager(), db_config.Pool())
 	networkHandler := service.NewNetworkHandler(networkManager)
@@ -234,6 +240,10 @@ func main() {
 	router.HandleFunc("/networks/{id}",                        auth.Middleware(networkHandler.Delete))
 	router.HandleFunc("/networks/{id}/connect",                auth.Middleware(networkHandler.Connect))
 	router.HandleFunc("/networks/{id}/containers/{projectId}", auth.Middleware(networkHandler.Disconnect))
+
+	// Container health monitoring
+	router.HandleFunc("/containers/health",       auth.Middleware(handler.GetHealth))
+	router.HandleFunc("/containers/health/reset", auth.Middleware(handler.ResetCircuit))
 
 	// Admin (double-protected: auth + admin role)
 	router.HandleFunc("/admin/stats",           auth.Middleware(auth.AdminOnly(adminHandler.Stats)))

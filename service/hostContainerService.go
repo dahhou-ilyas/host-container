@@ -126,6 +126,10 @@ func (cm *ContainerManager) CreateContainer(ctx context.Context, project Project
 		Tty:        true,
 		WorkingDir: "/workspace",
 		Cmd:        []string{"/bin/sh"},
+		Labels: map[string]string{
+			"codedock.managed": "true",
+			"codedock.user_id": project.UserId,
+		},
 	}
 
 	hostConfig := &container.HostConfig{
@@ -224,6 +228,10 @@ func (cm *ContainerManager) CreateContainerWithPort(ctx context.Context, project
 		Tty:          true,
 		WorkingDir:   "/workspace",
 		ExposedPorts: nat.PortSet{exposedPort: struct{}{}},
+		Labels: map[string]string{
+			"codedock.managed": "true",
+			"codedock.user_id": project.UserId,
+		},
 	}
 
 	hostConfig := &container.HostConfig{
@@ -461,6 +469,12 @@ func (cm *ContainerManager) StartContainer(ctx context.Context, projectID string
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
+
+	// Reset health fields on manual start — oom_killed and circuit_open don't carry over.
+	// restart_count is intentionally preserved so the circuit breaker history survives restarts.
+	cm.repo.GetDB().Exec(ctx, `
+		UPDATE containers SET health_status='none', oom_killed=false, circuit_open=false
+		WHERE id=$1::bigint`, info.ProjectID)
 
 	return nil
 }
@@ -709,6 +723,12 @@ func (cm *ContainerManager) GetMetricOfContainer(ctx context.Context, containerI
 
 func (cm *ContainerManager) Close() error {
 	return cm.client.Close()
+}
+
+// DockerClient exposes the underlying Docker SDK client for services that need
+// direct access (e.g. ContainerEventsService subscribing to the event stream).
+func (cm *ContainerManager) DockerClient() *client.Client {
+	return cm.client
 }
 
 
