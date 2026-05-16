@@ -477,7 +477,22 @@ func (cm *ContainerManager) RemoveContainer(ctx context.Context, projectID strin
 		return fmt.Errorf("container not found for project %s", projectID)
 	}
 
-	// DB d'abord (réversible via rollback)
+	// Collect Docker network IDs before the DELETE cascades container_networks
+	netRows, _ := cm.repo.GetDB().Query(ctx,
+		`SELECT n.docker_net_id FROM container_networks cn
+		 JOIN networks n ON n.id = cn.network_id
+		 WHERE cn.container_id = $1::bigint`, projectID)
+	var dockerNetIDs []string
+	if netRows != nil {
+		for netRows.Next() {
+			var nid string
+			netRows.Scan(&nid)
+			dockerNetIDs = append(dockerNetIDs, nid)
+		}
+		netRows.Close()
+	}
+
+	// DB d'abord (réversible via rollback) — CASCADE supprime container_networks
 	err = cm.repo.DeleteContainer(ctx, tx, projectID)
 	if err != nil {
 		return err
@@ -485,6 +500,11 @@ func (cm *ContainerManager) RemoveContainer(ctx context.Context, projectID strin
 
 	if err = tx.Commit(ctx); err != nil {
 		return err
+	}
+
+	// Déconnecter des réseaux Docker avant ContainerRemove
+	for _, netID := range dockerNetIDs {
+		cm.client.NetworkDisconnect(ctx, netID, info.ContainerID, true)
 	}
 
 	// Après commit : cleanup Docker + filesystem (best-effort, loguer les erreurs)
