@@ -38,8 +38,9 @@ type ExecRequest struct {
 
 
 type Handler struct {
-	manager *ContainerManager
-	pool    *pgxpool.Pool
+	manager  *ContainerManager
+	pool     *pgxpool.Pool
+	recovery *RecoveryService
 }
 
 func NewHandler(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Duration) (*Handler, error) {
@@ -48,6 +49,11 @@ func NewHandler(basePath string, pool *pgxpool.Pool, autoStopTimeout time.Durati
 		return nil, err
 	}
 	return &Handler{manager: manager, pool: pool}, nil
+}
+
+// SetRecovery injects the RecoveryService after construction (avoids circular init).
+func (h *Handler) SetRecovery(r *RecoveryService) {
+	h.recovery = r
 }
 
 func (h *Handler) Manager() *ContainerManager {
@@ -489,4 +495,67 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Close() error {
 	return h.manager.Close()
+}
+
+// GET /containers/health?project_id=<id>
+// Returns restart_count, health_status, oom_killed, circuit_open for the authenticated user's container.
+func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _ := r.Context().Value(utils.UserIDKey).(string)
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		utils.RespondError(w, "project_id required", http.StatusBadRequest)
+		return
+	}
+
+	var health struct {
+		RestartCount  int     `json:"restart_count"`
+		LastRestartAt *string `json:"last_restart_at"`
+		HealthStatus  string  `json:"health_status"`
+		OOMKilled     bool    `json:"oom_killed"`
+		CircuitOpen   bool    `json:"circuit_open"`
+		MaxRestarts   int     `json:"max_auto_restarts"`
+	}
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT c.restart_count, c.last_restart_at::text, c.health_status,
+		       c.oom_killed, c.circuit_open, p.max_auto_restarts
+		FROM containers c
+		JOIN users u ON u.id = c.user_id
+		JOIN plans p ON p.id = u.plan_id
+		WHERE c.id=$1::bigint AND c.user_id=$2::bigint`,
+		projectID, userID).Scan(
+		&health.RestartCount, &health.LastRestartAt, &health.HealthStatus,
+		&health.OOMKilled, &health.CircuitOpen, &health.MaxRestarts)
+	if err != nil {
+		utils.RespondError(w, "container not found", http.StatusNotFound)
+		return
+	}
+	utils.RespondJSON(w, utils.APIResponse{Success: true, Data: health}, http.StatusOK)
+}
+
+// POST /containers/health/reset?project_id=<id>
+// Clears circuit_open, restart_count and oom_killed so auto-recovery can resume.
+func (h *Handler) ResetCircuit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		utils.RespondError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.recovery == nil {
+		utils.RespondError(w, "recovery service unavailable", http.StatusInternalServerError)
+		return
+	}
+	userID, _ := r.Context().Value(utils.UserIDKey).(string)
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		utils.RespondError(w, "project_id required", http.StatusBadRequest)
+		return
+	}
+	if err := h.recovery.ResetCircuit(r.Context(), userID, projectID); err != nil {
+		utils.RespondError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	utils.RespondJSON(w, utils.APIResponse{Success: true}, http.StatusOK)
 }
